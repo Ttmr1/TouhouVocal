@@ -1,0 +1,2044 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>東方Vocalコレクション</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1128">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="東方Vocal">
+
+</head>
+<body>
+
+<div class="sky" id="sky"></div>
+
+<nav class="topbar">
+  <div class="brand">東方Vocal</div>
+  <div class="menu-wrap">
+    <button class="menu-btn" id="menuBtn" aria-expanded="false" aria-haspopup="true">
+      <span class="bars"><span></span><span></span><span></span></span>
+      メニュー
+    </button>
+    <div class="menu-dropdown" id="menuDropdown">
+      <button data-modal="hint">検索ヒント</button>
+      <button data-modal="stats">データ</button>
+
+      <div class="menu-group">
+        <button class="menu-group-toggle" data-group="circle" aria-expanded="false">
+          <span>サークル一覧</span><span class="menu-group-arrow">▸</span>
+        </button>
+        <div class="menu-subitems" data-groupitems="circle">
+          <button data-modal="circleSingle">サークル一覧（単）</button>
+          <button data-modal="circleMulti">サークル一覧（複）</button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button class="menu-group-toggle" data-group="orig" aria-expanded="false">
+          <span>原曲一覧</span><span class="menu-group-arrow">▸</span>
+        </button>
+        <div class="menu-subitems" data-groupitems="orig">
+          <button data-modal="origSingle">原曲一覧（単）</button>
+          <button data-modal="origMulti">原曲一覧（複）</button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button class="menu-group-toggle" data-group="datajs" aria-expanded="false">
+          <span>data.js管理</span><span class="menu-group-arrow">▸</span>
+        </button>
+        <div class="menu-subitems" data-groupitems="datajs">
+          <button data-action="downloadData">data.jsを保存（対応ブラウザは上書き可）</button>
+          <button data-action="resetData">data.jsの内容でリセット</button>
+          <button data-action="importData">data.jsを読み込む</button>
+        </div>
+      </div>
+
+      <button data-modal="bgSettings">背景変更</button>
+    </div>
+  </div>
+</nav>
+<input type="file" id="importDataInput" accept=".js" style="display:none;">
+
+<div class="wrap">
+  <header>
+    <h1>東方Vocalコレクション</h1>
+    <div class="stats">
+      <div class="stat"><b id="statTotal">0</b><span>曲</span></div>
+      <div class="stat"><b id="statCircle">0</b><span>サークル</span></div>
+      <div class="stat"><b id="statOrig">0</b><span>原曲</span></div>
+      <div class="stat"><b id="statFav">0</b><span>お気に入り</span></div>
+    </div>
+  </header>
+
+  <button class="register-toggle" id="registerToggle">＋ 曲を登録</button>
+  <div class="register-panel" id="registerPanel">
+    <h3>新しい曲を登録</h3>
+    <div class="register-grid-top">
+      <div>
+        <label>曲名 *</label>
+        <input type="text" id="regTitle" placeholder="曲名">
+      </div>
+      <div>
+        <label>No.</label>
+        <input type="number" id="regNo" min="1">
+      </div>
+      <div>
+        <label>尺（例 3:45 または 225）</label>
+        <input type="text" id="regSec" placeholder="mm:ss または 秒数">
+      </div>
+    </div>
+    <div class="multi-field">
+      <label>サークル（複数ある場合は分けて入力）</label>
+      <div class="multi-inputs" id="regCircleInputs">
+        <div class="multi-input-row"><input type="text" class="multi-input" list="circleDatalist" placeholder="サークル名"><button type="button" class="multi-remove" aria-label="削除">×</button></div>
+      </div>
+      <button type="button" class="multi-add" data-target="regCircleInputs" data-placeholder="サークル名" data-list="circleDatalist">＋ サークルを追加</button>
+    </div>
+    <div class="multi-field">
+      <label>原曲（複数ある場合は分けて入力）</label>
+      <div class="multi-inputs" id="regOrigInputs">
+        <div class="multi-input-row"><input type="text" class="multi-input" list="origDatalist" placeholder="原曲名"><button type="button" class="multi-remove" aria-label="削除">×</button></div>
+      </div>
+      <button type="button" class="multi-add" data-target="regOrigInputs" data-placeholder="原曲名" data-list="origDatalist">＋ 原曲を追加</button>
+    </div>
+    <datalist id="circleDatalist"></datalist>
+    <datalist id="origDatalist"></datalist>
+    <div class="register-hint">曲名以外は空欄でも登録できます。空欄の項目は「検索ヒント」の "不明" 検索で一覧できます。</div>
+    <div class="edit-error" id="regError" style="display:none;"></div>
+    <div class="register-actions">
+      <button class="btn btn-ghost" id="regCancel">キャンセル</button>
+      <button class="btn btn-primary" id="regSubmit">登録する</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder='曲名・サークル・原曲で検索' autocomplete="off">
+      <button type="button" class="search-clear-btn" id="searchClearBtn" aria-label="検索文字を消去" style="display:none;">×</button>
+    </div>
+    <select id="sortSelect">
+      <option value="no">並び替え: 登録順</option>
+      <option value="sec">並び替え: 尺の短い順</option>
+      <option value="orig">並び替え: 原曲順</option>
+      <option value="circle">並び替え: サークル名順</option>
+      <option value="random">並び替え: ランダム</option>
+    </select>
+    <button class="sort-dir-btn" id="sortDirBtn" type="button" aria-label="並び順を反転"></button>
+    <div class="fav-toggle" id="favToggle" role="button" tabindex="0">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
+      お気に入りのみ
+    </div>
+  </div>
+
+  <div class="result-line" id="resultLine"></div>
+
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th class="col-fav"></th>
+          <th class="col-no"><button data-sort="no">No <span class="sort-arrow" id="arrow-no"></span></button></th>
+          <th class="col-title"><button data-sort="title">曲名 <span class="sort-arrow" id="arrow-title"></span></button></th>
+          <th class="col-circle"><button data-sort="circle">サークル <span class="sort-arrow" id="arrow-circle"></span></button></th>
+          <th class="col-orig"><button data-sort="orig">原曲 <span class="sort-arrow" id="arrow-orig"></span></button></th>
+          <th class="col-sec"><button data-sort="sec">尺 <span class="sort-arrow" id="arrow-sec"></span></button></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <span class="mark">幻</span>
+      該当する曲が見つかりませんでした
+    </div>
+  </div>
+
+  <footer>Powered by 博麗神社の巫女の勘 — データは手元のExcelより</footer>
+</div>
+
+<!-- ===== modal ===== -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal-panel">
+    <div class="modal-head">
+      <h2 id="modalTitle"></h2>
+      <button class="modal-close" id="modalClose" aria-label="閉じる">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script>
+const WORKS_ORDER = ORIG_META_RAW.worksOrder;
+const ORIG_META = ORIG_META_RAW.origMeta;
+
+// ---------- storage ----------
+// Claude.ai 上では window.storage を優先して使う。
+// それが無い環境（GitHub Pages・ローカルファイルなど）では localStorage に自動フォールバックする。
+// localStorage も使えない場合（プライベートブラウジング等）はメモリ上だけの一時保存になる。
+const LS_PREFIX = 'touhou_vocal_';
+const memoryStore = {};
+function lsAvailable(){
+  try{
+    const k = '__ls_test__';
+    localStorage.setItem(k, '1');
+    localStorage.removeItem(k);
+    return true;
+  }catch(e){ return false; }
+}
+const useLocalStorage = (typeof localStorage !== 'undefined') && lsAvailable();
+
+async function storeGet(key){
+  try{
+    if(window.storage){
+      const r = await window.storage.get(key, false);
+      return r ? JSON.parse(r.value) : null;
+    }
+  }catch(e){ /* key not found or unavailable */ }
+  if(useLocalStorage){
+    try{
+      const raw = localStorage.getItem(LS_PREFIX + key);
+      return raw !== null ? JSON.parse(raw) : null;
+    }catch(e){ /* corrupt value etc. */ }
+  }
+  return memoryStore[key] ?? null;
+}
+async function storeSet(key, value){
+  try{
+    if(window.storage){
+      await window.storage.set(key, JSON.stringify(value), false);
+      return;
+    }
+  }catch(e){ /* ignore, fall back below */ }
+  if(useLocalStorage){
+    try{
+      localStorage.setItem(LS_PREFIX + key, JSON.stringify(value));
+      return;
+    }catch(e){ /* quota exceeded etc. — fall back to memory */ }
+  }
+  memoryStore[key] = value;
+}
+
+// ---------- state ----------
+// tracksById: id -> {title,circle,orig,sec}  /  order: [id,...] canonical No.1..N sequence
+let favorites = new Set(); // Set of ids
+let sortKey = 'no';
+let sortDir = 1;
+let filters = { q:'' };
+
+let tracksById = {};
+let order = [];
+let data = []; // derived: order.map -> {id,no,title,circle,orig,sec}
+
+function rebuildData(){
+  data = order.map((id, i) => {
+    const t = tracksById[id];
+    return { id, no: i+1, title: t.title, circle: t.circle || '', orig: t.orig || '', sec: t.sec };
+  });
+  refreshDatalists();
+}
+function refreshDatalists(){
+  const circleListEl = document.getElementById('circleDatalist');
+  const origListEl = document.getElementById('origDatalist');
+  if(!circleListEl || !origListEl) return;
+  const circleSet = new Set();
+  const origSet = new Set();
+  for(const d of data){
+    if(d.circle){ splitComponents(d.circle).forEach(c=>{ const v=c.trim(); if(v) circleSet.add(v); }); }
+    if(d.orig){ splitComponents(d.orig).forEach(o=>{ const v=o.trim(); if(v) origSet.add(v); }); }
+  }
+  const toOptions = set => [...set].sort((a,b)=>a.localeCompare(b,'ja')).map(v=>`<option value="${escapeHtml(v)}">`).join('');
+  circleListEl.innerHTML = toOptions(circleSet);
+  origListEl.innerHTML = toOptions(origSet);
+}
+function makeId(){ return 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+function addTrack({title, circle, orig, sec}, atNo){
+  const id = makeId();
+  tracksById[id] = { title, circle, orig, sec };
+  const insertIndex = (Number.isFinite(atNo) && atNo >= 1 && atNo <= order.length + 1) ? atNo - 1 : order.length;
+  order.splice(insertIndex, 0, id);
+  rebuildData();
+  return id;
+}
+function editTrack(id, fields, newNo){
+  tracksById[id] = { ...tracksById[id], ...fields };
+  const oldIndex = order.indexOf(id);
+  if(oldIndex === -1) return;
+  let newIndex = Math.min(Math.max(newNo - 1, 0), order.length - 1);
+  if(newIndex !== oldIndex){
+    order.splice(oldIndex, 1);
+    order.splice(newIndex, 0, id);
+  }
+  rebuildData();
+}
+function deleteTrack(id){
+  delete tracksById[id];
+  order = order.filter(x => x !== id);
+  favorites.delete(id);
+  rebuildData();
+}
+async function persistTrackState(){ await storeSet('trackState', { order, tracksById }); }
+async function persistFavorites(){ await storeSet('favorites', [...favorites]); }
+
+function fmtSec(sec){
+  if(sec === null || sec === undefined) return '—';
+  const m = Math.floor(sec/60);
+  const s = sec % 60;
+  return m + ':' + String(s).padStart(2,'0');
+}
+function fmtDurationLong(totalSec){
+  const day = Math.floor(totalSec/86400);
+  const hr = Math.floor((totalSec%86400)/3600);
+  const min = Math.floor((totalSec%3600)/60);
+  const sec = Math.floor(totalSec%60);
+  let out = '';
+  if(day) out += day+'日';
+  if(hr || day) out += hr+'時間';
+  out += min+'分'+sec+'秒';
+  return out;
+}
+const ORIG_SPLIT_OVERRIDE = {"U.N.オーエンは彼女なのか？ 恋色マスタースパーク": ["U.N.オーエンは彼女なのか？", "恋色マスタースパーク"], "赤より紅い夢ほおずきみたいに紅い魂妖魔夜行ルーネイトエルフおてんば恋娘上海紅茶館　～ Chinese Tea明治十七年の上海アリスヴワル魔法図書館ラクトガール　～ 少女密室メイドと血の懐中時計月時計　～ ルナ・ダイアルツェペシュの幼き末裔亡き王女の為のセプテット魔法少女達の百年祭U.N.オーエンは彼女なのか？紅より儚い永遠紅楼　～ Eastern Dream...": ["赤より紅い夢", "ほおずきみたいに紅い魂", "妖魔夜行", "ルーネイトエルフ", "おてんば恋娘", "上海紅茶館　～ Chinese Tea", "明治十七年の上海アリス", "ヴワル魔法図書館", "ラクトガール　～ 少女密室", "メイドと血の懐中時計", "月時計　～ ルナ・ダイアル", "ツェペシュの幼き末裔", "亡き王女の為のセプテット", "魔法少女達の百年祭", "U.N.オーエンは彼女なのか？", "紅より儚い永遠", "紅楼　～ Eastern Dream..."], "魔界地方都市エソテリア 虎柄の毘沙門天": ["魔界地方都市エソテリア", "虎柄の毘沙門天"], "二色蓮花蝶　～ red and white 信仰は儚き人間の為に": ["二色蓮花蝶　～ red and white", "信仰は儚き人間の為に"]};
+function splitComponents(s){
+  if(ORIG_SPLIT_OVERRIDE[s]) return ORIG_SPLIT_OVERRIDE[s];
+  const parts = s.split('\u3000');
+  const merged = [];
+  for(const p of parts){
+    if(merged.length && p.startsWith('～')){
+      merged[merged.length-1] = merged[merged.length-1] + '\u3000' + p;
+    } else {
+      merged.push(p);
+    }
+  }
+  return merged;
+}
+function canonicalKey(raw){
+  const comps = splitComponents(raw).map(c=>c.trim()).filter(Boolean);
+  const sorted = [...comps].sort((a,b)=>a.localeCompare(b,'ja'));
+  return { key: sorted.join('\u3000'), comps: sorted };
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function uniqSorted(arr){ return [...new Set(arr.filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja')); }
+
+// 全角/半角（英数字・記号・スペースなど）の違いを区別せずに比較するための正規化
+function normalizeText(s){
+  return String(s).normalize('NFKC').toLowerCase();
+}
+
+function updateHeaderStats(){
+  document.getElementById('statTotal').textContent = data.length.toLocaleString();
+  document.getElementById('statCircle').textContent = uniqSorted(data.map(d=>d.circle)).length;
+  document.getElementById('statOrig').textContent = uniqSorted(data.map(d=>d.orig)).length;
+  document.getElementById('statFav').textContent = favorites.size;
+}
+
+// ---------- search parsing ----------
+// クエリを " で始まる単語ごとにセグメント分割し、各セグメントを述語（predicate）に変換して
+// 全セグメントを AND で組み合わせる（例：`"or 霊夢 魔理沙 "and フラン "time -10`）。
+const QUOTE_CHARS = '"\u201c\u201d';
+
+const FIELD_GROUP_RE = /(曲名|サークル|原曲)\(([^)]*)\)/g;
+
+function splitSegments(qRaw){
+  const q = qRaw.trim();
+  if(!q) return [];
+  const segments = [];
+
+  // 「曲名(...)」「サークル(...)」「原曲(...)」は内部に空白を含んでいても
+  // ひとつのセグメントとして扱う（先に抜き出してから残りを通常どおり分割する）
+  FIELD_GROUP_RE.lastIndex = 0;
+  let m;
+  while((m = FIELD_GROUP_RE.exec(q))){
+    segments.push(m[0]);
+  }
+  const remaining = q.replace(FIELD_GROUP_RE, ' ').trim();
+
+  const words = remaining.split(/\s+/).filter(Boolean);
+  let current = null;
+  for(const w of words){
+    if(QUOTE_CHARS.includes(w[0])){
+      if(current !== null) segments.push(current);
+      current = w;
+    } else {
+      current = current === null ? w : current + ' ' + w;
+    }
+  }
+  if(current !== null) segments.push(current);
+  return segments;
+}
+
+function extractOrKeywords(inner){
+  const m = inner.match(/^or\s+(.+)$/);
+  if(m) return m[1].split(/\s+/).filter(Boolean);
+  return null;
+}
+function extractAndKeywords(inner){
+  const m = inner.match(/^(?:and|&)\s*(.+)$/);
+  if(m) return m[1].split(/\s+/).filter(Boolean);
+  return null;
+}
+
+// "!キーワード" は否定条件（そのキーワードを含まない場合に一致）として扱う
+function matchKeyword(t, k){
+  if(k.startsWith('!') && k.length > 1) return !t.includes(k.slice(1));
+  return t.includes(k);
+}
+
+// 曲名(...) / サークル(...) / 原曲(...) : 特定の項目だけを対象にした検索
+// 括弧の中でも or / and / & / ! のタグ構文が使える
+function fieldTextOf(d, fieldName){
+  if(fieldName === '曲名') return normalizeText(d.title);
+  if(fieldName === 'サークル') return normalizeText(d.circle);
+  return normalizeText(d.orig);
+}
+function buildFieldPredicate(fieldName, innerRaw){
+  const inner = normalizeText(innerRaw).trim();
+  if(!inner) return () => true;
+  const orKw = extractOrKeywords(inner);
+  if(orKw && orKw.length){
+    return d => { const t = fieldTextOf(d, fieldName); return orKw.some(k=>matchKeyword(t,k)); };
+  }
+  const andKw = extractAndKeywords(inner);
+  if(andKw && andKw.length){
+    return d => { const t = fieldTextOf(d, fieldName); return andKw.every(k=>matchKeyword(t,k)); };
+  }
+  const words = inner.split(/\s+/).filter(Boolean);
+  return d => { const t = fieldTextOf(d, fieldName); return words.every(w => matchKeyword(t,w)); };
+}
+
+function segmentToPredicate(seg){
+  const fieldMatch = seg.match(/^(曲名|サークル|原曲)\((.*)\)$/);
+  if(fieldMatch){
+    return buildFieldPredicate(fieldMatch[1], fieldMatch[2]);
+  }
+  if(QUOTE_CHARS.includes(seg[0])){
+    const rest = seg.slice(1);
+    const endsWithQuote = rest.length > 0 && QUOTE_CHARS.includes(rest[rest.length - 1]);
+    const rawInner = endsWithQuote ? rest.slice(0, -1) : rest;
+    const inner = normalizeText(rawInner).trim();
+
+    if(!endsWithQuote){
+      // 先頭の " のみ → タグとして解釈
+      if(inner === 'f') return d => favorites.has(d.id);
+      if(inner === '不明') return d => !d.circle || !d.orig || d.sec===null || d.sec===undefined;
+
+      const timeMatch = inner.match(/^time\s+(.*)$/);
+      if(timeMatch){
+        const rangeStr = timeMatch[1].trim();
+        const tm = rangeStr.match(/^([0-9:]+)?-([0-9:]+)?$/);
+        if(tm && (tm[1] || tm[2])){
+          const startSec = tm[1] ? parseSecInput(tm[1]) : 0;
+          const endSec = tm[2] ? parseSecInput(tm[2]) : Infinity;
+          if(startSec !== null && (endSec === Infinity || endSec !== null)){
+            const lo = Math.min(startSec, endSec === Infinity ? startSec : endSec);
+            const hi = endSec === Infinity ? Infinity : Math.max(startSec, endSec);
+            return d => d.sec !== null && d.sec !== undefined && d.sec >= lo && d.sec <= hi;
+          }
+        }
+      }
+
+      // 数字のみ（ダッシュなし）→ その番号の曲を1件だけ表示（例: "14 → No.14）
+      const exactNoMatch = inner.match(/^(\d+)$/);
+      if(exactNoMatch){
+        const n = parseInt(exactNoMatch[1], 10);
+        return d => d.no === n;
+      }
+
+      const rangeMatch = inner.match(/^(\d+)?-(\d+)?$/);
+      if(rangeMatch && (rangeMatch[1] || rangeMatch[2])){
+        const maxNo = data.reduce((m,d)=>Math.max(m,d.no),0);
+        const start = rangeMatch[1] ? parseInt(rangeMatch[1],10) : 1;
+        const end = rangeMatch[2] ? parseInt(rangeMatch[2],10) : maxNo;
+        const lo = Math.min(start,end), hi = Math.max(start,end);
+        return d => d.no >= lo && d.no <= hi;
+      }
+
+      // "only <text> → 曲名・サークル・原曲のいずれかが、その文字列と完全一致する曲だけを表示
+      const onlyMatch = inner.match(/^only\s+(.+)$/);
+      if(onlyMatch){
+        const val = onlyMatch[1].trim();
+        return d => normalizeText(d.title) === val || normalizeText(d.circle) === val || normalizeText(d.orig) === val;
+      }
+
+      const orKw = extractOrKeywords(inner);
+      if(orKw && orKw.length){
+        return d => { const t = rowText(d); return orKw.some(k=>matchKeyword(t,k)); };
+      }
+      const andKw = extractAndKeywords(inner);
+      if(andKw && andKw.length){
+        return d => { const t = rowText(d); return andKw.every(k=>matchKeyword(t,k)); };
+      }
+    }
+    // タグと認識できない、または前後を " で囲んでいる → 通常の検索（クォートを外したフレーズ検索）
+    return d => rowText(d).includes(inner);
+  }
+  // プレーンな語（クォートなし）→ 単語ごとの AND 一致（並び順を問わない、!キーワードで否定）
+  const words = normalizeText(seg).split(/\s+/).filter(Boolean);
+  return d => { const t = rowText(d); return words.every(w => matchKeyword(t,w)); };
+}
+
+function buildQueryPlan(qRaw){
+  const segments = splitSegments(qRaw);
+  let forceRandom = false;
+  const predicates = [];
+  for(const seg of segments){
+    if(QUOTE_CHARS.includes(seg[0])){
+      const rest = seg.slice(1);
+      const endsWithQuote = rest.length > 0 && QUOTE_CHARS.includes(rest[rest.length - 1]);
+      const inner = normalizeText(endsWithQuote ? rest.slice(0, -1) : rest).trim();
+      if(!endsWithQuote && inner === 'r'){
+        forceRandom = true;
+        continue; // "r はフィルタ条件を追加せず、並び順だけランダムにする
+      }
+    }
+    predicates.push(segmentToPredicate(seg));
+  }
+  return { predicates, forceRandom };
+}
+
+function rowText(d){ return normalizeText(d.title+' '+d.circle+' '+d.orig); }
+
+// ---------- render ----------
+const tbody = document.getElementById('tbody');
+const emptyState = document.getElementById('emptyState');
+const resultLine = document.getElementById('resultLine');
+const searchInput = document.getElementById('searchInput');
+const searchClearBtn = document.getElementById('searchClearBtn');
+
+function applyFilterSort(){
+  let rows = data;
+  const plan = buildQueryPlan(filters.q);
+  if(plan.predicates.length){
+    rows = rows.filter(d => plan.predicates.every(p => p(d)));
+  }
+
+  if(filters.favOnly) rows = rows.filter(d => favorites.has(d.id));
+
+  const effectiveSortKey = plan.forceRandom ? 'random' : sortKey;
+  if(effectiveSortKey === 'random'){
+    rows = [...rows].sort(()=>Math.random()-0.5);
+  } else {
+    rows = [...rows].sort((a,b)=>{
+      let av = a[effectiveSortKey], bv = b[effectiveSortKey];
+      if(effectiveSortKey === 'sec'){ av = av ?? -1; bv = bv ?? -1; return (av - bv) * sortDir; }
+      if(effectiveSortKey === 'no') return (av - bv) * sortDir;
+      return String(av).localeCompare(String(bv), 'ja') * sortDir;
+    });
+  }
+  return rows;
+}
+
+function render(){
+  const rows = applyFilterSort();
+  const hasQuery = filters.q && filters.q.trim().length > 0;
+  const pct = data.length ? (rows.length / data.length * 100) : 0;
+  const pctStr = Number.isInteger(pct) ? pct.toString() : pct.toFixed(1);
+  resultLine.innerHTML = `全 <b>${data.length.toLocaleString()}</b> 曲中 <b>${rows.length.toLocaleString()}</b> 曲（${pctStr}%）を表示`
+    + (hasQuery ? ' <button class="clear-search" id="clearSearchBtn">検索を解除 ×</button>' : '');
+  searchClearBtn.style.display = (searchInput.value.length > 0) ? 'block' : 'none';
+  updateHeaderStats();
+
+  if(rows.length === 0){
+    tbody.innerHTML = '';
+    emptyState.style.display = 'block';
+    return;
+  }
+  emptyState.style.display = 'none';
+
+  const frag = document.createDocumentFragment();
+  for(const d of rows){
+    const tr = document.createElement('tr');
+    tr.dataset.id = d.id;
+    const isFav = favorites.has(d.id);
+    tr.innerHTML = `
+      <td class="col-fav"><button class="star-btn ${isFav?'active':''}" data-id="${d.id}" aria-label="お気に入り切替">${isFav ? '★' : '☆'}</button></td>
+      <td class="col-no">No.${String(d.no).padStart(4,'0')}</td>
+      <td class="col-title">${escapeHtml(d.title)}</td>
+      <td class="col-circle">${escapeHtml(d.circle) || '<span style=\"opacity:.4\">—</span>'}</td>
+      <td class="col-orig">${escapeHtml(d.orig) || '<span style=\"opacity:.4\">—</span>'}</td>
+      <td class="col-sec">${fmtSec(d.sec)}</td>
+    `;
+    frag.appendChild(tr);
+  }
+  tbody.innerHTML = '';
+  tbody.appendChild(frag);
+}
+
+const sortSelect = document.getElementById('sortSelect');
+const sortDirBtn = document.getElementById('sortDirBtn');
+function updateArrows(){
+  ['no','title','circle','orig','sec'].forEach(k=>{
+    const el = document.getElementById('arrow-'+k);
+    el.textContent = (k === sortKey) ? (sortDir === 1 ? '▲' : '▼') : '';
+  });
+  if(['no','sec','orig','circle','random'].includes(sortKey)) sortSelect.value = sortKey;
+  sortDirBtn.textContent = sortDir === 1 ? '↑' : '↓';
+  sortDirBtn.title = sortDir === 1 ? '昇順（クリックで降順に）' : '降順（クリックで昇順に）';
+}
+
+// ---------- events: search/filter/sort ----------
+searchInput.addEventListener('input', e=>{ filters.q = e.target.value; render(); });
+searchClearBtn.addEventListener('click', ()=>{
+  filters.q = '';
+  searchInput.value = '';
+  searchInput.focus();
+  render();
+});
+const favToggle = document.getElementById('favToggle');
+function toggleFavFilter(){
+  filters.favOnly = !filters.favOnly;
+  favToggle.classList.toggle('active', filters.favOnly);
+  render();
+}
+favToggle.addEventListener('click', toggleFavFilter);
+favToggle.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleFavFilter(); } });
+
+resultLine.addEventListener('click', e=>{
+  if(e.target.id !== 'clearSearchBtn') return;
+  filters.q = '';
+  searchInput.value = '';
+  render();
+});
+
+document.querySelectorAll('th button[data-sort]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const key = btn.dataset.sort;
+    if(sortKey === key){ sortDir *= -1; } else { sortKey = key; sortDir = 1; }
+    updateArrows(); render();
+  });
+});
+
+sortSelect.addEventListener('change', ()=>{
+  sortKey = sortSelect.value;
+  sortDir = 1;
+  updateArrows(); render();
+});
+sortDirBtn.addEventListener('click', ()=>{
+  sortDir *= -1;
+  updateArrows(); render();
+});
+
+tbody.addEventListener('click', async e=>{
+  const starBtn = e.target.closest('.star-btn');
+  if(starBtn){
+    const id = starBtn.dataset.id;
+    if(favorites.has(id)) favorites.delete(id); else favorites.add(id);
+    await persistFavorites();
+    render();
+    return;
+  }
+  const tr = e.target.closest('tr');
+  if(!tr || !tr.dataset.id) return;
+  openTrackDetail(tr.dataset.id);
+});
+
+function openTrackDetail(id, mode){
+  mode = mode || 'view';
+  const t = data.find(x => x.id === id);
+  if(!t) return;
+  let html, title;
+  if(mode === 'edit'){ html = buildDetailEditHtml(t); title = '曲を編集'; }
+  else if(mode === 'confirmDelete'){ html = buildDetailDeleteConfirmHtml(t); title = '削除の確認'; }
+  else { html = buildDetailViewHtml(t); title = '曲の詳細'; }
+  openModal(title, html);
+}
+
+function buildDetailViewHtml(t){
+  const isFav = favorites.has(t.id);
+  const na = '<span style="opacity:.4">未登録</span>';
+  const fillable = (label, value, extraClass) => value
+    ? `<div class="field ${extraClass||''}"><div class="flabel">${label}</div><button class="fvalue fvalue-fill" data-fill="${escapeHtml(value)}">${escapeHtml(value)}</button></div>`
+    : `<div class="field ${extraClass||''}"><div class="flabel">${label}</div><div class="fvalue">${na}</div></div>`;
+  return `
+    <div class="track-detail">
+      <div class="field no"><div class="flabel">No.</div><div class="fvalue">No.${String(t.no).padStart(4,'0')}</div></div>
+      ${fillable('曲名', t.title, 'title')}
+      ${fillable('サークル', t.circle)}
+      ${fillable('原曲', t.orig)}
+      <div class="field"><div class="flabel">尺</div><div class="fvalue">${fmtSec(t.sec)}</div></div>
+      <div class="detail-actions">
+        <button class="btn btn-ghost detail-fav-btn" data-id="${t.id}">${isFav ? '★ お気に入りから外す' : '☆ お気に入りに追加'}</button>
+        <button class="btn btn-ghost detail-edit-btn" data-id="${t.id}">✎ 編集</button>
+        <button class="btn btn-danger detail-delete-btn" data-id="${t.id}">🗑 削除</button>
+      </div>
+    </div>`;
+}
+
+function buildDetailEditHtml(t){
+  const secStr = (t.sec !== null && t.sec !== undefined) ? fmtSec(t.sec) : '';
+  const circleVals = t.circle ? splitComponents(t.circle).map(v=>v.trim()).filter(Boolean) : [''];
+  const origVals = t.orig ? splitComponents(t.orig).map(v=>v.trim()).filter(Boolean) : [''];
+  const circleRows = (circleVals.length ? circleVals : ['']).map(v=>multiInputRowHtml('サークル名', v, 'circleDatalist')).join('');
+  const origRows = (origVals.length ? origVals : ['']).map(v=>multiInputRowHtml('原曲名', v, 'origDatalist')).join('');
+  return `
+    <div class="track-detail edit-mode">
+      <div class="edit-field">
+        <label>No.（1〜${data.length}）</label>
+        <input type="number" id="editNo" min="1" max="${data.length}" value="${t.no}">
+      </div>
+      <div class="edit-field">
+        <label>曲名 *</label>
+        <input type="text" id="editTitle" value="${escapeHtml(t.title)}">
+      </div>
+      <div class="multi-field">
+        <label>サークル（複数ある場合は分けて入力）</label>
+        <div class="multi-inputs" id="editCircleInputs">${circleRows}</div>
+        <button type="button" class="multi-add" data-target="editCircleInputs" data-placeholder="サークル名" data-list="circleDatalist">＋ サークルを追加</button>
+      </div>
+      <div class="multi-field">
+        <label>原曲（複数ある場合は分けて入力）</label>
+        <div class="multi-inputs" id="editOrigInputs">${origRows}</div>
+        <button type="button" class="multi-add" data-target="editOrigInputs" data-placeholder="原曲名" data-list="origDatalist">＋ 原曲を追加</button>
+      </div>
+      <div class="edit-field">
+        <label>尺（例 3:45 または 225）</label>
+        <input type="text" id="editSec" value="${escapeHtml(secStr)}">
+      </div>
+      <div class="edit-error" id="editError" style="display:none;"></div>
+      <div class="detail-actions">
+        <button class="btn btn-ghost detail-cancel-btn" data-id="${t.id}">キャンセル</button>
+        <button class="btn btn-primary detail-save-btn" data-id="${t.id}">保存</button>
+      </div>
+    </div>`;
+}
+
+function buildDetailDeleteConfirmHtml(t){
+  return `
+    <div class="track-detail">
+      <div class="field title"><div class="flabel">この曲を削除しますか？</div><div class="fvalue">${escapeHtml(t.title)}</div></div>
+      <p style="color:var(--ink-dim); font-size:13px; margin:0;">この操作は取り消せません。</p>
+      <div class="detail-actions">
+        <button class="btn btn-ghost detail-delete-cancel-btn" data-id="${t.id}">キャンセル</button>
+        <button class="btn btn-danger detail-delete-confirm-btn" data-id="${t.id}">削除する</button>
+      </div>
+    </div>`;
+}
+
+async function saveTrackEdit(id){
+  const errEl = document.getElementById('editError');
+  function showErr(msg){ errEl.textContent = msg; errEl.style.display = 'block'; }
+
+  const title = document.getElementById('editTitle').value.trim();
+  const circle = collectMultiValues('editCircleInputs').join('\u3000');
+  const orig = collectMultiValues('editOrigInputs').join('\u3000');
+  const secRaw = document.getElementById('editSec').value.trim();
+  const noRaw = document.getElementById('editNo').value.trim();
+
+  if(!title){ showErr('曲名を入力してください'); return; }
+  const sec = parseSecInput(secRaw);
+  if(secRaw && sec === null){ showErr('尺の形式が正しくありません（例: 3:45 または 225）'); return; }
+  const newNo = parseInt(noRaw, 10);
+  if(!Number.isFinite(newNo) || newNo < 1 || newNo > data.length){
+    showErr(`No. は 1〜${data.length} の範囲で指定してください`); return;
+  }
+
+  editTrack(id, { title, circle, orig, sec }, newNo);
+  await persistTrackState();
+  render();
+  openTrackDetail(id, 'view');
+}
+
+async function performDelete(id){
+  deleteTrack(id);
+  await persistTrackState();
+  await persistFavorites();
+  render();
+  closeModal();
+}
+
+// ---------- registration panel ----------
+const registerToggle = document.getElementById('registerToggle');
+const registerPanel = document.getElementById('registerPanel');
+registerToggle.addEventListener('click', ()=>{
+  registerPanel.classList.toggle('open');
+  registerToggle.textContent = registerPanel.classList.contains('open') ? '－ 閉じる' : '＋ 曲を登録';
+  if(registerPanel.classList.contains('open')){
+    document.getElementById('regNo').value = data.length + 1;
+    document.getElementById('regError').style.display = 'none';
+  }
+});
+
+// ---------- multi-value input (サークル / 原曲) ----------
+function multiInputRowHtml(placeholder, value, listId){
+  const listAttr = listId ? ` list="${escapeHtml(listId)}"` : '';
+  return `<div class="multi-input-row"><input type="text" class="multi-input"${listAttr} placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value||'')}"><button type="button" class="multi-remove" aria-label="削除">×</button></div>`;
+}
+function resetMultiInputs(containerId, placeholder, listId){
+  const container = document.getElementById(containerId);
+  container.innerHTML = multiInputRowHtml(placeholder, '', listId);
+}
+function collectMultiValues(containerId){
+  return [...document.querySelectorAll('#'+containerId+' .multi-input')]
+    .map(el => el.value.trim())
+    .filter(Boolean);
+}
+document.addEventListener('click', e=>{
+  const addBtn = e.target.closest('.multi-add');
+  if(addBtn){
+    const container = document.getElementById(addBtn.dataset.target);
+    if(container){
+      container.insertAdjacentHTML('beforeend', multiInputRowHtml(addBtn.dataset.placeholder || '', '', addBtn.dataset.list));
+    }
+    return;
+  }
+  const removeBtn = e.target.closest('.multi-remove');
+  if(removeBtn){
+    const row = removeBtn.closest('.multi-input-row');
+    const container = row && row.parentElement;
+    if(container && container.children.length > 1){
+      row.remove();
+    } else if(row){
+      const input = row.querySelector('.multi-input');
+      if(input) input.value = '';
+    }
+  }
+});
+
+document.getElementById('regCancel').addEventListener('click', ()=>{
+  registerPanel.classList.remove('open');
+  registerToggle.textContent = '＋ 曲を登録';
+  document.getElementById('regTitle').value = '';
+  document.getElementById('regNo').value = '';
+  document.getElementById('regSec').value = '';
+  document.getElementById('regError').style.display = 'none';
+  resetMultiInputs('regCircleInputs', 'サークル名', 'circleDatalist');
+  resetMultiInputs('regOrigInputs', '原曲名', 'origDatalist');
+});
+function parseSecInput(str){
+  str = str.trim();
+  if(!str) return null;
+  if(str.includes(':')){
+    const [m,s] = str.split(':').map(x=>parseInt(x,10));
+    if(Number.isFinite(m) && Number.isFinite(s)) return m*60+s;
+    return null;
+  }
+  const n = parseInt(str,10);
+  return Number.isFinite(n) ? n : null;
+}
+// 曲名・サークル・原曲がすべて一致する（全角/半角を区別しない）曲がすでに登録されているか判定
+function findDuplicateTrack(title, circle, orig, excludeId){
+  const nt = normalizeText(title), nc = normalizeText(circle||''), no = normalizeText(orig||'');
+  return data.find(d =>
+    d.id !== excludeId &&
+    normalizeText(d.title) === nt &&
+    normalizeText(d.circle) === nc &&
+    normalizeText(d.orig) === no
+  );
+}
+
+document.getElementById('regSubmit').addEventListener('click', async ()=>{
+  const regErrorEl = document.getElementById('regError');
+  regErrorEl.style.display = 'none';
+  const title = document.getElementById('regTitle').value.trim();
+  const circle = collectMultiValues('regCircleInputs').join('\u3000');
+  const orig = collectMultiValues('regOrigInputs').join('\u3000');
+  const secRaw = document.getElementById('regSec').value.trim();
+  const noRaw = document.getElementById('regNo').value.trim();
+  if(!title){ document.getElementById('regTitle').focus(); return; }
+  const dup = findDuplicateTrack(title, circle, orig);
+  if(dup){
+    regErrorEl.textContent = `既に登録されています（No.${String(dup.no).padStart(4,'0')}）`;
+    regErrorEl.style.display = 'block';
+    return;
+  }
+  const sec = parseSecInput(secRaw);
+  let atNo = noRaw ? parseInt(noRaw, 10) : data.length + 1;
+  if(!Number.isFinite(atNo) || atNo < 1) atNo = data.length + 1;
+  if(atNo > data.length + 1) atNo = data.length + 1;
+  addTrack({ title, circle, orig, sec }, atNo);
+  await persistTrackState();
+  render();
+  document.getElementById('regTitle').value = '';
+  document.getElementById('regSec').value = '';
+  resetMultiInputs('regCircleInputs', 'サークル名', 'circleDatalist');
+  resetMultiInputs('regOrigInputs', '原曲名', 'origDatalist');
+  registerPanel.classList.remove('open');
+  registerToggle.textContent = '＋ 曲を登録';
+});
+
+
+
+// ---------- menu / modal ----------
+const menuBtn = document.getElementById('menuBtn');
+const menuDropdown = document.getElementById('menuDropdown');
+menuBtn.addEventListener('click', (e)=>{
+  e.stopPropagation();
+  const open = menuDropdown.classList.toggle('open');
+  menuBtn.setAttribute('aria-expanded', open);
+});
+document.addEventListener('click', ()=>{ menuDropdown.classList.remove('open'); menuBtn.setAttribute('aria-expanded','false'); });
+
+document.querySelectorAll('.menu-group-toggle').forEach(btn=>{
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const group = btn.dataset.group;
+    const items = document.querySelector(`.menu-subitems[data-groupitems="${group}"]`);
+    const isOpen = items.classList.toggle('open');
+    btn.setAttribute('aria-expanded', isOpen);
+  });
+});
+
+const modalBackdrop = document.getElementById('modalBackdrop');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody = document.getElementById('modalBody');
+function openModal(title, bodyHtml){
+  modalTitle.textContent = title;
+  modalBody.innerHTML = bodyHtml;
+  modalBackdrop.classList.add('open');
+}
+function closeModal(){ modalBackdrop.classList.remove('open'); }
+document.getElementById('modalClose').addEventListener('click', closeModal);
+modalBackdrop.addEventListener('click', e=>{ if(e.target === modalBackdrop) closeModal(); });
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e=>{
+  if(e.key !== '/') return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  e.preventDefault();
+  searchInput.focus();
+});
+
+function fillSearchAndClose(value){
+  searchInput.value = value;
+  filters.q = value;
+  closeModal();
+  render();
+}
+
+document.querySelectorAll('.menu-dropdown button[data-modal]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    menuDropdown.classList.remove('open');
+    const type = btn.dataset.modal;
+    if(type === 'hint') openModal('検索ヒント', buildHintHtml());
+    if(type === 'stats') openModal('データ', buildStatsHtml());
+    if(type === 'circleSingle') openModal('サークル一覧（単）', buildCircleListHtml(false));
+    if(type === 'circleMulti') openModal('サークル一覧（複）', buildCircleListHtml(true));
+    if(type === 'origSingle') openModal('原曲一覧（単）', buildOrigListSingleHtml());
+    if(type === 'origMulti') openModal('原曲一覧（複）', buildOrigListMultiHtml());
+    if(type === 'bgSettings') openModal('背景変更', buildBackgroundSettingsHtml());
+  });
+});
+document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    menuDropdown.classList.remove('open');
+    if(btn.dataset.action === 'downloadData') await exportDataJs();
+    if(btn.dataset.action === 'resetData') openModal('リセットの確認', buildResetConfirmHtml());
+    if(btn.dataset.action === 'importData') importDataInput.click();
+  });
+});
+
+// 現在の全曲データ（登録・編集・削除を反映済み）を data.js として保存する
+// 対応ブラウザ（Chrome/Edge等）では File System Access API を使い、既存の data.js を選んで直接上書きできる。
+// 一度選んだファイルは同じセッション中は覚えておき、次回以降はダイアログなしで上書きする。
+let cachedDataJsHandle = null;
+
+function buildDataJsContent(){
+  const exportArr = data.map(d => ({
+    no: d.no, title: d.title, circle: d.circle || null, orig: d.orig || null, sec: d.sec
+  }));
+  return 'const RAW_DATA = ' + JSON.stringify(exportArr) + ';\n' +
+         'const ORIG_META_RAW = ' + JSON.stringify(ORIG_META_RAW) + ';\n';
+}
+
+async function exportDataJs(){
+  const content = buildDataJsContent();
+
+  if(window.showSaveFilePicker){
+    try{
+      let handle = cachedDataJsHandle;
+      if(!handle){
+        handle = await window.showSaveFilePicker({
+          suggestedName: 'data.js',
+          types: [{ description: 'JavaScript', accept: { 'text/javascript': ['.js'] } }]
+        });
+        cachedDataJsHandle = handle;
+      }
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      return; // 上書き保存 成功
+    }catch(err){
+      if(err && err.name === 'AbortError') return; // ユーザーがダイアログをキャンセルした場合は何もしない
+      cachedDataJsHandle = null;
+      // 失敗した場合は下の従来方式（ダウンロード）にフォールバック
+    }
+  }
+
+  // フォールバック: 従来通りダウンロードフォルダへ保存
+  const blob = new Blob([content], { type: 'text/javascript' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'data.js';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// data.js（RAW_DATA）の内容に戻す：登録・編集・削除・お気に入りはすべて消える
+function buildResetConfirmHtml(){
+  return `
+    <div class="track-detail">
+      <div class="field title"><div class="flabel">data.jsの内容でリセットしますか？</div></div>
+      <p style="color:var(--ink-dim); font-size:13px; margin:0;">
+        現在ブラウザに保存されている登録・編集・削除・お気に入りの内容はすべて失われ、
+        読み込んだ data.js（${RAW_DATA.length.toLocaleString()}曲）の状態に戻ります。この操作は取り消せません。
+      </p>
+      <div class="detail-actions">
+        <button class="btn btn-ghost" id="resetCancelBtn">キャンセル</button>
+        <button class="btn btn-danger" id="resetConfirmBtn">リセットする</button>
+      </div>
+    </div>`;
+}
+async function performDataReset(){
+  order = RAW_DATA.map(d => 'b' + d.no);
+  tracksById = {};
+  for(const d of RAW_DATA){
+    tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec };
+  }
+  favorites = new Set();
+  rebuildData();
+  await persistTrackState();
+  await persistFavorites();
+  render();
+  closeModal();
+}
+
+// ----- data.js の読み込み（インポート） -----
+const importDataInput = document.getElementById('importDataInput');
+let pendingImportArr = null;
+
+function readFileAsText(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+importDataInput.addEventListener('change', async ()=>{
+  const file = importDataInput.files && importDataInput.files[0];
+  importDataInput.value = ''; // 同じファイルを続けて選んでも change が発火するように
+  if(!file) return;
+  let text;
+  try{
+    text = await readFileAsText(file);
+  }catch(e){
+    openModal('読み込みエラー', `<p style="color:var(--hakurei); font-size:13px;">ファイルを読み込めませんでした。</p>`);
+    return;
+  }
+  const m = text.match(/const\s+RAW_DATA\s*=\s*(\[[\s\S]*?\]);/);
+  if(!m){
+    openModal('読み込みエラー', `<p style="color:var(--hakurei); font-size:13px;">このファイルから RAW_DATA が見つかりませんでした。data.js を選んでください。</p>`);
+    return;
+  }
+  let arr;
+  try{
+    arr = JSON.parse(m[1]);
+    if(!Array.isArray(arr) || !arr.every(d => typeof d === 'object' && d && typeof d.title === 'string')){
+      throw new Error('invalid shape');
+    }
+  }catch(e){
+    openModal('読み込みエラー', `<p style="color:var(--hakurei); font-size:13px;">RAW_DATA の形式が正しくありません。</p>`);
+    return;
+  }
+
+  // ORIG_META_RAW（作品分類の参照表）も含まれていれば一緒に読み込む
+  const m2 = text.match(/const\s+ORIG_META_RAW\s*=\s*(\{[\s\S]*?\});/);
+  let metaArr = null;
+  if(m2){
+    try{ metaArr = JSON.parse(m2[1]); }catch(e){ /* 無視して既存のまま使う */ }
+  }
+
+  pendingImportArr = { tracks: arr, meta: metaArr, fileName: file.name };
+  openModal('読み込みの確認', buildImportConfirmHtml(arr.length, file.name, !!metaArr));
+});
+
+function buildImportConfirmHtml(count, fileName, hasMeta){
+  return `
+    <div class="track-detail">
+      <div class="field title"><div class="flabel">「${escapeHtml(fileName)}」を読み込みますか？</div></div>
+      <p style="color:var(--ink-dim); font-size:13px; margin:0;">
+        ${count.toLocaleString()}曲のデータが見つかりました${hasMeta ? '（作品分類の参照表も含まれています）' : ''}。
+        現在ブラウザに保存されている登録・編集・削除・お気に入りの内容はすべて失われ、このファイルの内容に置き換わります。この操作は取り消せません。
+      </p>
+      <div class="detail-actions">
+        <button class="btn btn-ghost" id="importCancelBtn">キャンセル</button>
+        <button class="btn btn-danger" id="importConfirmBtn">読み込む</button>
+      </div>
+    </div>`;
+}
+
+async function performDataImport(){
+  if(!pendingImportArr) return;
+  const { tracks, meta } = pendingImportArr;
+  order = tracks.map(d => 'b' + d.no);
+  tracksById = {};
+  for(const d of tracks){
+    tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec ?? null };
+  }
+  if(meta && meta.worksOrder && meta.origMeta){
+    ORIG_META_RAW.worksOrder = meta.worksOrder;
+    ORIG_META_RAW.origMeta = meta.origMeta;
+    WORKS_ORDER.length = 0; WORKS_ORDER.push(...meta.worksOrder);
+    Object.keys(ORIG_META).forEach(k=>delete ORIG_META[k]);
+    Object.assign(ORIG_META, meta.origMeta);
+  }
+  favorites = new Set();
+  pendingImportArr = null;
+  rebuildData();
+  await persistTrackState();
+  await persistFavorites();
+  render();
+  closeModal();
+}
+
+// ----- サークル一覧（単／複） -----
+function buildCircleListHtml(multi){
+  let rowsHtml;
+  if(!multi){
+    const counts = {};
+    for(const d of data){
+      if(!d.circle || d.circle.includes('\u3000')) continue;
+      counts[d.circle] = (counts[d.circle]||0)+1;
+    }
+    const list = Object.entries(counts).sort((a,b)=>a[0].localeCompare(b[0],'ja'));
+    rowsHtml = list.map(([circle,count])=>
+      `<button class="list-row" data-fill="${escapeHtml(circle)}"><span>${escapeHtml(circle)}</span><span class="cnt">${count}</span></button>`
+    ).join('');
+  } else {
+    const groups = {};
+    for(const d of data){
+      if(!d.circle || !d.circle.includes('\u3000')) continue;
+      const { key, comps } = canonicalKey(d.circle);
+      if(!groups[key]) groups[key] = { comps, count:0 };
+      groups[key].count += 1;
+    }
+    const list = Object.values(groups).sort((a,b)=>a.comps.join('\u3000').localeCompare(b.comps.join('\u3000'),'ja'));
+    rowsHtml = list.map(g=>{
+      const label = g.comps.join(' × ');
+      const fillVal = '"' + g.comps.join(' and ');
+      return `<button class="list-row" data-fill="${escapeHtml(fillVal)}"><span>${escapeHtml(label)}</span><span class="cnt">${g.count}</span></button>`;
+    }).join('');
+  }
+  rowsHtml = rowsHtml || '<div class="list-empty">該当するサークルがありません</div>';
+  return `<input type="text" class="list-search" id="listSearchBox" placeholder="サークル名で絞り込み">
+    <div class="flat-list" id="flatListBody">${rowsHtml}</div>`;
+}
+
+// ----- 原曲一覧（単） -----
+function classifyOrig(orig){
+  const comps = splitComponents(orig);
+  if(comps.length > 1) return '__medley__';
+  const meta = ORIG_META[orig];
+  return meta ? meta.category : '__unknown__';
+}
+function origStageOrder(orig){
+  const meta = ORIG_META[orig];
+  return (meta && typeof meta.order === 'number') ? meta.order : 500;
+}
+
+function buildOrigListSingleHtml(){
+  const counts = {};
+  for(const d of data){ if(!d.orig) continue; counts[d.orig] = (counts[d.orig]||0)+1; }
+  const buckets = {};
+  const unknown = [];
+  for(const [orig,count] of Object.entries(counts)){
+    const cat = classifyOrig(orig);
+    if(cat === '__medley__') continue; // 複数原曲は原曲一覧（複）へ
+    if(cat === '__unknown__') unknown.push({orig,count});
+    else (buckets[cat] = buckets[cat]||[]).push({orig,count});
+  }
+  let html = '';
+  for(const work of WORKS_ORDER){
+    const list = buckets[work];
+    if(!list || !list.length) continue;
+    list.sort((a,b)=> origStageOrder(a.orig) - origStageOrder(b.orig) || a.orig.localeCompare(b.orig,'ja'));
+    const trackTotal = list.reduce((s,x)=>s+x.count,0);
+    html += `<details class="work-group"><summary><span class="wname">${escapeHtml(work)}</span><span class="wcount">${list.length}曲 / ${trackTotal}トラック</span></summary>
+      <div class="orig-sub">${list.map(x=>`<button class="list-row" data-fill="${escapeHtml(x.orig)}"><span>${escapeHtml(x.orig)}</span><span class="cnt">${x.count}</span></button>`).join('')}</div>
+    </details>`;
+  }
+  if(unknown.length){
+    unknown.sort((a,b)=>a.orig.localeCompare(b.orig,'ja'));
+    html += `<details class="work-group"><summary><span class="wname">作品分類不明</span><span class="wcount">${unknown.length}曲</span></summary>
+      <div class="orig-sub">${unknown.map(x=>`<button class="list-row" data-fill="${escapeHtml(x.orig)}"><span>${escapeHtml(x.orig)}</span><span class="cnt">${x.count}</span></button>`).join('')}</div>
+    </details>`;
+  }
+  return html || '<div class="list-empty">該当する原曲がありません</div>';
+}
+
+// ----- 原曲一覧（複） -----
+function buildOrigListMultiHtml(){
+  const groups = {};
+  for(const d of data){
+    if(!d.orig || classifyOrig(d.orig) !== '__medley__') continue;
+    const { key, comps } = canonicalKey(d.orig);
+    if(!groups[key]) groups[key] = { comps, count:0 };
+    groups[key].count += 1;
+  }
+  const list = Object.values(groups).sort((a,b)=>a.comps.join('\u3000').localeCompare(b.comps.join('\u3000'),'ja'));
+  const rowsHtml = list.map(g=>{
+    const label = g.comps.join(' / ');
+    const fillVal = '"' + g.comps.join(' and ');
+    return `<button class="list-row" data-fill="${escapeHtml(fillVal)}"><span>${escapeHtml(label)}</span><span class="cnt">${g.count}</span></button>`;
+  }).join('') || '<div class="list-empty">該当する原曲がありません</div>';
+  return `<input type="text" class="list-search" id="listSearchBox" placeholder="原曲名で絞り込み">
+    <div class="flat-list" id="flatListBody">${rowsHtml}</div>`;
+}
+
+// ----- 背景変更（弾幕セットの選択） -----
+function buildBackgroundSettingsHtml(){
+  const rows = DANMAKU_SETS.map(s => `
+    <label class="bgset-row">
+      <input type="checkbox" class="bgset-check" data-setid="${s.id}" ${enabledDmSets.has(s.id) ? 'checked' : ''}>
+      <span>${escapeHtml(s.label)}</span>
+    </label>`).join('');
+  return `<div class="bgset-list">${rows}</div>
+    <p style="color:var(--ink-faint); font-size:11.5px; margin-top:12px;">チェックした弾幕が順番に背景に登場します。少なくとも1つは選択してください。</p>`;
+}
+
+// ----- 検索ヒント -----
+function buildHintHtml(){
+  const hints = [
+    ['"f', 'お気に入りのみ表示する'],
+    ['"r', '曲の並び順をランダムにする'],
+    ['"14', '<b>No.14</b> の曲だけを表示する'],
+    ['"-10', '<b>No.1</b> から <b>No.10</b> までの曲を表示する'],
+    ['"3-15', '<b>No.3</b> から <b>No.15</b> までの曲を表示する'],
+    ['"time -3:00 ／ "time -180', '尺が <b>3分以内</b> の曲を表示する（分:秒 でも秒数でも指定可）'],
+    ['"time 20-60 ／ "time 0:20-1:00', '尺が <b>20秒から1分</b> までの曲を表示する'],
+    ['"time 70- ／ "time 1:10-', '尺が <b>1分10秒以上</b> の曲を表示する'],
+    ['"only cc', '曲名・サークル・原曲のいずれかが <b>「cc」だけ</b>（完全一致）の曲を表示する'],
+    ['"不明', 'サークル・原曲・尺など、登録されていない項目がある曲を表示する'],
+    ['"or 霊夢 魔理沙', '複数のキーワードのどれかを含む曲を表示する（OR検索）'],
+    ['"and 霊夢 魔理沙 ／ "& 霊夢 魔理沙', '複数のキーワードすべてを含む曲を表示する（AND検索）'],
+    ['!魔理沙', 'キーワードの前に <b>!</b> を付けると否定になる（例: 霊夢 !魔理沙 → 霊夢を含み魔理沙を含まない曲）'],
+    ['曲名(霊夢 魔理沙)', '<b>曲名だけ</b>を対象に検索する（サークル・原曲に含まれていても対象外）'],
+    ['サークル(霊夢 魔理沙) ／ 原曲(霊夢 魔理沙)', '同様に<b>サークル名だけ</b> / <b>原曲だけ</b>を対象に検索する'],
+    ['曲名(or 霊夢 魔理沙) ／ 曲名(!魔理沙)', '括弧の中でも or / and / & / ! のタグ構文が使える'],
+  ];
+  return hints.map(([tag,desc])=>`<div class="hint-item"><span class="hint-tag">${escapeHtml(tag)}</span><span class="hint-desc">${desc}</span></div>`).join('')
+    + '<p style="color:var(--ink-faint); font-size:12px; margin-top:14px;">タグは先頭に <b>"</b> を1つ付けるだけで有効です（閉じる " は不要）。<code>"f</code> はお気に入り表示になりますが、前後を " で囲んだ <code>"f"</code> はタグとして機能せず、通常のキーワード検索になります。OR / AND 検索も同様に、先頭に " を付けたときだけ有効です。</p>'
+    + '<p style="color:var(--ink-faint); font-size:12px; margin-top:8px;">キーボードショートカット: <code>/</code> で検索欄にフォーカス、<code>Esc</code> でモーダルを閉じる。</p>';
+}
+
+// ----- データ -----
+function buildBarRowsHtml(rows){
+  const max = Math.max(...rows.map(r=>r.count));
+  const total = data.length || 1;
+  return rows.map(r => {
+    const pct = r.count / total * 100;
+    const pctStr = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
+    return `
+    <div class="bar-row">
+      <div class="bar-label">${escapeHtml(r.label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(r.count/max*100).toFixed(1)}%"></div></div>
+      <div class="bar-count">${r.count}<span class="bar-pct">（${pctStr}%）</span></div>
+    </div>`;
+  }).join('');
+}
+
+function buildWorkBarChart(){
+  const counts = {};
+  for(const d of data){
+    if(!d.orig) continue;
+    const cat = classifyOrig(d.orig);
+    let label;
+    if(cat === '__medley__') label = '複数原曲';
+    else if(cat === '__unknown__') label = '分類不明';
+    else label = cat;
+    counts[label] = (counts[label]||0) + 1;
+  }
+  const order = [...WORKS_ORDER, '複数原曲', '分類不明'];
+  const rows = order
+    .filter(label => counts[label] > 0)
+    .map(label => ({ label, count: counts[label] }));
+  if(!rows.length) return '<p class="bar-chart-empty">データがありません</p>';
+  return `<div class="bar-chart">${buildBarRowsHtml(rows)}</div>`;
+}
+
+function buildCircleBarChart(){
+  const counts = {};
+  for(const d of data){
+    if(!d.circle) continue;
+    splitComponents(d.circle).forEach(c=>{
+      const v = c.trim();
+      if(v) counts[v] = (counts[v]||0) + 1;
+    });
+  }
+  const totalCircles = Object.keys(counts).length;
+  let rows = Object.entries(counts).map(([label,count])=>({label,count}));
+  rows.sort((a,b)=> b.count - a.count || a.label.localeCompare(b.label,'ja'));
+  const TOP_N = 25;
+  const truncated = rows.length > TOP_N;
+  rows = rows.slice(0, TOP_N);
+  if(!rows.length) return '<p class="bar-chart-empty">データがありません</p>';
+  return `<div class="bar-chart">${buildBarRowsHtml(rows)}</div>`
+    + (truncated ? `<p class="bar-chart-note">曲数の多い上位${TOP_N}サークルを表示（全${totalCircles.toLocaleString()}サークル中）</p>` : '');
+}
+
+function buildOrigSongBarChart(){
+  const counts = {};
+  for(const d of data){
+    if(!d.orig) continue;
+    splitComponents(d.orig).forEach(o=>{
+      const v = o.trim();
+      if(v) counts[v] = (counts[v]||0) + 1;
+    });
+  }
+  const totalOrigs = Object.keys(counts).length;
+  let rows = Object.entries(counts).map(([label,count])=>({label,count}));
+  rows.sort((a,b)=> b.count - a.count || a.label.localeCompare(b.label,'ja'));
+  const TOP_N = 25;
+  const truncated = rows.length > TOP_N;
+  rows = rows.slice(0, TOP_N);
+  if(!rows.length) return '<p class="bar-chart-empty">データがありません</p>';
+  return `<div class="bar-chart">${buildBarRowsHtml(rows)}</div>`
+    + (truncated ? `<p class="bar-chart-note">アレンジ数の多い上位${TOP_N}原曲を表示（全${totalOrigs.toLocaleString()}原曲中）</p>` : '');
+}
+
+function buildStatsHtml(){
+  const total = data.length;
+  const circleCount = uniqSorted(data.map(d=>d.circle)).length;
+  const origCount = uniqSorted(data.map(d=>d.orig)).length;
+  const withSec = data.filter(d => d.sec !== null && d.sec !== undefined);
+  const totalSec = withSec.reduce((s,d)=>s+d.sec,0);
+  const avgSec = withSec.length ? totalSec / withSec.length : 0;
+  const avgMin = Math.floor(avgSec/60);
+  const avgRemSec = (avgSec - avgMin*60).toFixed(1);
+  let single=0, multi=0;
+  for(const d of data){
+    if(!d.orig) continue;
+    const comps = splitComponents(d.orig);
+    if(comps.length === 1) single++; else multi++;
+  }
+  const cards = [
+    ['曲数', total.toLocaleString()+' 曲'],
+    ['サークル数', circleCount.toLocaleString()+' サークル'],
+    ['曲の平均尺', avgMin+'分'+avgRemSec+'秒'],
+    ['曲の尺の合計', fmtDurationLong(totalSec)],
+    ['原曲が1種類の曲数', single.toLocaleString()+' 曲'],
+    ['原曲が複数の曲数', multi.toLocaleString()+' 曲'],
+  ];
+  return `<div class="stat-grid">${cards.map(([label,value])=>`<div class="stat-card"><div class="label">${label}</div><div class="value">${value}</div></div>`).join('')}</div>
+    <p style="color:var(--ink-faint); font-size:11.5px; margin-top:14px;">※「原曲が1種類 / 複数」は原曲欄を全角スペース区切りで解析した目安です。表記ゆれにより実際と多少ずれる場合があります。</p>
+    <div class="bar-tabs">
+      <button type="button" class="bar-tab active" data-bartab="work">作品別 曲数</button>
+      <button type="button" class="bar-tab" data-bartab="origsong">原曲別 曲数</button>
+      <button type="button" class="bar-tab" data-bartab="circle">サークル別 曲数</button>
+    </div>
+    <div class="bar-panel" data-barpanel="work">${buildWorkBarChart()}</div>
+    <div class="bar-panel" data-barpanel="origsong" style="display:none;">${buildOrigSongBarChart()}</div>
+    <div class="bar-panel" data-barpanel="circle" style="display:none;">${buildCircleBarChart()}</div>`;
+}
+
+// ----- modal delegated events (search box + row click-to-fill) -----
+modalBody.addEventListener('change', async e=>{
+  const cb = e.target.closest('.bgset-check');
+  if(!cb) return;
+  const id = cb.dataset.setid;
+  if(cb.checked) enabledDmSets.add(id); else enabledDmSets.delete(id);
+  if(enabledDmSets.size === 0){
+    enabledDmSets.add(id);
+    cb.checked = true;
+    return;
+  }
+  await storeSet('danmakuSets', [...enabledDmSets]);
+  buildActiveDmCards();
+  dmSwitchToCard(dmPickRandomCardIndex(-1));
+});
+modalBody.addEventListener('input', e=>{
+  if(e.target.id !== 'listSearchBox') return;
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('#flatListBody .list-row').forEach(row=>{
+    row.style.display = row.dataset.fill.toLowerCase().includes(q) ? 'flex' : 'none';
+  });
+});
+modalBody.addEventListener('click', async e=>{
+  const barTab = e.target.closest('.bar-tab');
+  if(barTab){
+    const target = barTab.dataset.bartab;
+    modalBody.querySelectorAll('.bar-tab').forEach(b=>b.classList.toggle('active', b===barTab));
+    modalBody.querySelectorAll('.bar-panel').forEach(p=>{
+      p.style.display = (p.dataset.barpanel === target) ? 'block' : 'none';
+    });
+    return;
+  }
+
+  const fillVal = e.target.closest('.fvalue-fill');
+  if(fillVal){ fillSearchAndClose(fillVal.dataset.fill); return; }
+
+  const favBtn = e.target.closest('.detail-fav-btn');
+  if(favBtn){
+    const id = favBtn.dataset.id;
+    if(favorites.has(id)) favorites.delete(id); else favorites.add(id);
+    await persistFavorites();
+    render();
+    openTrackDetail(id, 'view');
+    return;
+  }
+  const editBtn = e.target.closest('.detail-edit-btn');
+  if(editBtn){ openTrackDetail(editBtn.dataset.id, 'edit'); return; }
+
+  const cancelBtn = e.target.closest('.detail-cancel-btn');
+  if(cancelBtn){ openTrackDetail(cancelBtn.dataset.id, 'view'); return; }
+
+  const saveBtn = e.target.closest('.detail-save-btn');
+  if(saveBtn){ await saveTrackEdit(saveBtn.dataset.id); return; }
+
+  const delBtn = e.target.closest('.detail-delete-btn');
+  if(delBtn){ openTrackDetail(delBtn.dataset.id, 'confirmDelete'); return; }
+
+  const delCancelBtn = e.target.closest('.detail-delete-cancel-btn');
+  if(delCancelBtn){ openTrackDetail(delCancelBtn.dataset.id, 'view'); return; }
+
+  const delConfirmBtn = e.target.closest('.detail-delete-confirm-btn');
+  if(delConfirmBtn){ await performDelete(delConfirmBtn.dataset.id); return; }
+
+  if(e.target.closest('#resetCancelBtn')){ closeModal(); return; }
+  if(e.target.closest('#resetConfirmBtn')){ await performDataReset(); return; }
+  if(e.target.closest('#importCancelBtn')){ pendingImportArr = null; closeModal(); return; }
+  if(e.target.closest('#importConfirmBtn')){ await performDataImport(); return; }
+
+  const row = e.target.closest('.list-row');
+  if(!row) return;
+  fillSearchAndClose(row.dataset.fill);
+});
+
+// ---------- ambient background: cosmos + danmaku ----------
+const PLANET_STYLES = [
+  { size:64,  color:'radial-gradient(circle at 32% 30%, #ffd7a8, #b25a3e 70%)', ring:'rgba(255,215,168,0.4)', glow:'rgba(178,90,62,0.35)' },
+  { size:46,  color:'radial-gradient(circle at 32% 30%, #b9c8ff, #3a4fae 70%)', ring:'rgba(185,200,255,0.4)', glow:'rgba(58,79,174,0.35)' },
+  { size:34,  color:'radial-gradient(circle at 32% 30%, #d7ffe0, #3f9e6c 70%)', ring:'rgba(215,255,224,0.35)', glow:'rgba(63,158,108,0.3)'  },
+];
+
+function buildConstellations(){
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const w = window.innerWidth || 1200;
+  const h = window.innerHeight || 800;
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('class', 'constellation-svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+
+  const palette = ['rgba(205,164,94,0.55)', 'rgba(197,118,255,0.5)', 'rgba(242,236,221,0.5)'];
+  const clusters = 6;
+  for(let c=0; c<clusters; c++){
+    const color = palette[c % palette.length];
+    const cx = w * (0.08 + Math.random()*0.84);
+    const cy = h * (0.06 + Math.random()*0.5);
+    const count = 3 + Math.floor(Math.random()*3);
+    const pts = [];
+    for(let p=0; p<count; p++){
+      pts.push([cx + (Math.random()-0.5)*140, cy + (Math.random()-0.5)*100]);
+    }
+    for(let p=1; p<pts.length; p++){
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', pts[p-1][0]); line.setAttribute('y1', pts[p-1][1]);
+      line.setAttribute('x2', pts[p][0]);   line.setAttribute('y2', pts[p][1]);
+      line.setAttribute('class', 'constellation-line');
+      line.style.stroke = color;
+      svg.appendChild(line);
+    }
+    pts.forEach(([x,y], i)=>{
+      const dot = document.createElementNS(svgNS, 'circle');
+      dot.setAttribute('cx', x); dot.setAttribute('cy', y);
+      dot.setAttribute('r', 2.2 + Math.random()*1.4);
+      dot.setAttribute('class', 'constellation-dot' + (Math.random()<0.5 ? ' pulse' : ''));
+      dot.style.fill = 'var(--ink)';
+      if(i % 3 === 0) dot.style.animationDelay = (Math.random()*4)+'s';
+      svg.appendChild(dot);
+    });
+  }
+  return svg;
+}
+
+// =====================================================================
+// 弾幕エンジン（提供されたスペルカード演習ゲームの弾幕ロジックを移植）
+// キャラクター（自機・ボス）や当たり判定・スコアは持たず、
+// 背景演出として同じ弾のスポーン処理をそのまま画面全体で走らせる。
+// =====================================================================
+let dmCanvas, dmCtx, dmW = 0, dmH = 0;
+let dmBullets = [], dmLasers = [];
+let dmElapsed = 0, dmLastT = 0, dmAnimId = null;
+let dmCardIdx = 0, dmCardElapsed = 0;
+let dmWaitRemaining = 0; // 弾幕切り替え時の待機（0より大きい間は次の弾幕を出さない）
+const DM_SWITCH_WAIT_SEC = 5;
+const DM_MAX_BULLETS = 1500;
+
+function dmRand(a,b){ return a+Math.random()*(b-a); }
+function dmHsl(h,s,l){ return `hsl(${h%360},${s}%,${l}%)`; }
+function dmSpawnBullet(o){
+  if(dmBullets.length >= DM_MAX_BULLETS){
+    dmBullets.shift(); // 上限に達したら一番古い弾を追い出し、新しい弾が欠けずに生成されるようにする
+  }
+  const b = Object.assign({ x:0,y:0,vx:0,vy:0,r:4,color:'#fff',spin:0,life:0,type:'circle' }, o);
+  dmBullets.push(b);
+  return b;
+}
+// 点(px,py)がレーザーlの線分付近にあるか判定（弾の軌道変化に使用）
+function dmPointNearLaser(px, py, l){
+  const dx = Math.cos(l.angle), dy = Math.sin(l.angle);
+  const relx = px - l.x, rely = py - l.y;
+  const proj = relx*dx + rely*dy;
+  if(proj < 0 || proj > l.length) return false;
+  const perp = Math.abs(relx*(-dy) + rely*dx);
+  return perp < (l.width/2 + 3);
+}
+
+// 原点（画面比率で指定、リサイズにも追従）
+function dmPt(px, py){ return { x: dmW*px, y: dmH*py }; }
+
+// ---- 2. 禁忌「フォーオブアカインド」: 4隅からの4色渦 ----
+const DmFourOfAKind = (function(){
+  return function(t, dt){
+    const base = dmPt(0.5, 0.12);
+    const off = Math.min(dmW,dmH)*0.05;
+    const corners = [
+      {x:base.x-off,y:base.y-off*0.6}, {x:base.x+off,y:base.y-off*0.6},
+      {x:base.x-off,y:base.y+off*0.6}, {x:base.x+off,y:base.y+off*0.6},
+    ];
+    const hues = [0, 210, 45, 280];
+    if(Math.floor(t*60)%10===0){
+      corners.forEach((c,ci)=>{
+        const a = t*2.0*(ci%2===0?1:-1) + ci*Math.PI/2;
+        const sp = 1.9;
+        dmSpawnBullet({ x:c.x,y:c.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, r:4, color:dmHsl(hues[ci],85,60), type:'petal', spin:a });
+      });
+    }
+  };
+})();
+
+// ---- 弾幕A: 軌道を変える弾（提供された SampleC04 の翻案） ----
+// 敵を中心に三角形をなす3本のレーザーが回転し、放射状にばらまかれた弾は
+// レーザーに触れると軌道を変える。
+// ※内部状態は関数のプロパティ（_で始まる名前）として保持する。
+//   こうすることで dmResetPatternTimers() から確実にリセットでき、
+//   一度パターンを離れて再度選び直したときにも自然に（レーザーの再生成や
+//   即時の弾幕再開を伴って）立ち上がる。
+function Dm11LaserRedirect(t, dt){
+  const R = 190;
+  const self = Dm11LaserRedirect;
+  if(self._angle0 === undefined) self._angle0 = 0;
+  if(self._lasers === undefined) self._lasers = null;
+  if(self._myBullets === undefined) self._myBullets = [];
+  if(self._nextWave === undefined) self._nextWave = -10;
+
+  const o = dmPt(0.5, 0.24);
+  if(!self._lasers){
+    self._lasers = [];
+    const cols = ['#ff6b6b', '#6ba8ff', '#7dffb0'];
+    for(let i=0;i<3;i++){
+      const l = { x:o.x, y:o.y, angle:0, angularVel:0, length:Math.sqrt(3)*R, width:9, warn:0, life:1, maxLife:999999, color:cols[i] };
+      dmLasers.push(l);
+      self._lasers.push(l);
+    }
+  }
+  self._angle0 += dt * 60 * 0.8; // 原作の回転速度（1フレームあたり1度）の0.8倍
+  for(let i=0;i<3;i++){
+    const angDeg = self._angle0 + i*120;
+    const rad = angDeg*Math.PI/180;
+    const l = self._lasers[i];
+    l.x = o.x + R*Math.cos(rad - 150*Math.PI/180);
+    l.y = o.y + R*Math.sin(rad - 150*Math.PI/180);
+    l.angle = rad;
+  }
+  // 1秒ごとに360度へ弾をばらまく（経過時間ベースで判定）
+  if(t >= self._nextWave){
+    self._nextWave = t + 1.0;
+    const angleStep = 2; // 弾と弾の間の角度を2度刻みにする
+    const angles = [];
+    for(let a=0;a<360;a+=angleStep) angles.push(a);
+    // 上限に達して打ち切られても扇形にならないよう、角度の順序をシャッフルしてから発射する
+    for(let i=angles.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [angles[i], angles[j]] = [angles[j], angles[i]];
+    }
+    for(const a of angles){
+      const rad = a*Math.PI/180;
+      const b = dmSpawnBullet({ x:o.x,y:o.y, vx:Math.cos(rad)*1.3, vy:Math.sin(rad)*1.3, r:3.5, color:'#8fd9ff', glow:'#8fd9ff', type:'circle' });
+      if(b) self._myBullets.push(b);
+    }
+  }
+  // レーザーに触れた弾は軌道を変える（レーザーの向きに沿って弾き出す）
+  for(let i=self._myBullets.length-1;i>=0;i--){
+    const b = self._myBullets[i];
+    b._age = (b._age||0) + dt;
+    if(b._redirected || b._age > 6){ self._myBullets.splice(i,1); continue; }
+    for(const l of self._lasers){
+      if(dmPointNearLaser(b.x, b.y, l)){
+        const newAngle = l.angle + Math.PI/2;
+        const sp = (Math.hypot(b.vx,b.vy) || 1.3) * 2;
+        b.vx = Math.cos(newAngle)*sp;
+        b.vy = Math.sin(newAngle)*sp;
+        b.color = '#ffe066'; b.glow = '#ffe066';
+        b._redirected = true;
+        break;
+      }
+    }
+  }
+}
+
+// ---- 弾幕B: 分裂する弾（提供された SampleA04 の翻案） ----
+// 種弾が時間差で3方向に分裂→さらに3方向→さらに5方向へと連鎖的に分裂する。
+function Dm12Split(t, dt){
+  const self = Dm12Split;
+  if(self._pending === undefined) self._pending = [];
+  if(self._nextWave === undefined) self._nextWave = -10;
+  if(self._yellowAngleOffset === undefined) self._yellowAngleOffset = 0;
+  const palette = ['#4d9dff', '#ff5468', '#c576ff'];
+  const BASE_SPEED = 1.7; // 種弾（depth0）の速度を基準とする
+  const BASE_SIZE = 4.4;  // 種弾（depth0）の大きさを基準とする
+
+  const o = dmPt(0.5, 0.12);
+  if(t >= self._nextWave){
+    self._nextWave = t + 1.38;
+    [-20,0,20].forEach(deg=>{
+      self._pending.push({ fire:t+0.4, x:o.x, y:o.y, angDeg:90+deg, depth:0 });
+    });
+
+    // 黄色の大玉ファン：画面上部から扇状（20度刻み）に下方向へ、通常弾の8倍サイズ・2.25倍速
+    // 発射するたびに角度オフセットが10度ずつ進むが、角度の範囲は20〜160度に固定し、
+    // 超えた分は範囲内へ折り返す（例：170度→30度）
+    const yellowOrigin = dmPt(0.5, 0.03);
+    const YELLOW_LO = 20, YELLOW_HI = 160, YELLOW_SPAN = YELLOW_HI - YELLOW_LO; // 140
+    for(let deg=20; deg<=160; deg+=20){
+      let wrappedDeg = YELLOW_LO + ((deg + self._yellowAngleOffset - YELLOW_LO) % YELLOW_SPAN);
+      if(wrappedDeg < YELLOW_LO) wrappedDeg += YELLOW_SPAN;
+      const rad = wrappedDeg*Math.PI/180;
+      const speed = BASE_SPEED * 2.25;
+      dmSpawnBullet({
+        x:yellowOrigin.x, y:yellowOrigin.y,
+        vx:Math.cos(rad)*speed, vy:Math.sin(rad)*speed,
+        r:BASE_SIZE*8, color:'#ffe066', glow:'#ffe066', type:'circle'
+      });
+    }
+    self._yellowAngleOffset += 10;
+  }
+  for(let i=self._pending.length-1;i>=0;i--){
+    const p = self._pending[i];
+    if(t < p.fire) continue;
+    self._pending.splice(i,1);
+    const rad = p.angDeg*Math.PI/180;
+    const speed = BASE_SPEED - p.depth*0.2;
+    const vx = Math.cos(rad)*speed, vy = Math.sin(rad)*speed;
+    const col = palette[p.depth % palette.length];
+    dmSpawnBullet({ x:p.x, y:p.y, vx, vy, r:BASE_SIZE-p.depth*0.6, color:col, glow:col, type: p.depth===2?'petal':'circle', spin:rad });
+    if(p.depth < 2){
+      const spread = p.depth===0 ? [-15,0,15] : [-30,-15,0,15,30];
+      const delay = p.depth===0 ? 0.9 : 0.55;
+      const fx = p.x + vx*delay*60; // 1フレーム=約1/60秒として飛行後の未来位置を概算
+      const fy = p.y + vy*delay*60;
+      spread.forEach(dOff=>{
+        self._pending.push({ fire:t+delay, x:fx, y:fy, angDeg:p.angDeg+dOff, depth:p.depth+1 });
+      });
+    }
+  }
+}
+
+// ---- 弾幕D: 螺旋弾幕（内外二層が逆回転しながら渦を巻き、周期的に大玉ノヴァが弾ける） ----
+function Dm13Spiral(t, dt){
+  const self = Dm13Spiral;
+  if(self._rotA === undefined) self._rotA = 0;
+  if(self._rotB === undefined) self._rotB = 0;
+  if(self._nextNova === undefined) self._nextNova = -10;
+  const o = dmPt(0.5, 0.15);
+  self._rotA += dt * 100;
+  self._rotB -= dt * 65;
+  if(Math.floor(t*20)%3===0 && (t*20|0)!==self._last){
+    self._last = (t*20|0);
+    const armsA = 4, armsB = 6;
+    const stepA = 70; // 水色アームの角度刻みを70度に
+    for(let i=0;i<armsA;i++){
+      const rad = (self._rotA + i*stepA) * Math.PI/180;
+      dmSpawnBullet({ x:o.x,y:o.y, vx:Math.cos(rad)*1.6, vy:Math.sin(rad)*1.6, r:4, color:'#7dc8ff', glow:'#7dc8ff', type:'circle' });
+    }
+    for(let i=0;i<armsB;i++){
+      const rad = (self._rotB + i*(360/armsB)) * Math.PI/180;
+      dmSpawnBullet({ x:o.x,y:o.y, vx:Math.cos(rad)*1.1, vy:Math.sin(rad)*1.1, r:3.2, color:'#c8a8ff', glow:'#c8a8ff', type:'circle' });
+    }
+  }
+  // 周期的な大玉ノヴァでアクセントをつける
+  if(t >= self._nextNova){
+    self._nextNova = t + 3.0; // 3秒ごとに変更
+    const n = 16;
+    for(let i=0;i<n;i++){
+      const rad = i*(Math.PI*2/n);
+      dmSpawnBullet({ x:o.x,y:o.y, vx:Math.cos(rad)*2.0, vy:Math.sin(rad)*2.0, r:5.5, color:'#ffffff', glow:'#9dc8ff', type:'circle' });
+    }
+  }
+}
+
+// ---- 弾幕F: 波状弾幕（複数の正弦波が重なり合いながら画面上部から降り注ぐ） ----
+function Dm15Wave(t, dt){
+  const self = Dm15Wave;
+  if(self._nextDrop === undefined) self._nextDrop = -10;
+  if(t >= self._nextDrop){
+    self._nextDrop = t + 0.05; // 少し間隔を空けて密度を抑える
+    const streams = 5;
+    for(let s=0; s<streams; s++){
+      const phase = s * (Math.PI*2/streams);
+      const x = dmW * (0.5 + 0.46*Math.sin(t*2 + phase));
+      dmSpawnBullet({ x, y:-10, vx:Math.cos(t*2+phase)*0.6, vy:2.6, r:4.5, color:'#8fffb0', glow:'#8fffb0', type:'circle' }); // 上下移動を高速化
+    }
+  }
+}
+
+// ---- 弾幕K: 螺旋降下弾幕（単一種類の弾が回転しながら下へ降りていく） ----
+function Dm20Whirlpool(t, dt){
+  const self = Dm20Whirlpool;
+  if(self._nextWave === undefined) self._nextWave = -10;
+  const o = dmPt(0.5, 0.1);
+  if(t >= self._nextWave){
+    self._nextWave = t + 0.15;
+    const n = 6;
+    const baseRot = t * 90; // 度/秒の基準回転角
+    for(let i=0;i<n;i++){
+      const baseAngle = (baseRot + i*(360/n)) * Math.PI/180;
+      dmSpawnBullet({
+        x:o.x, y:o.y, vx:0, vy:0, r:4.5, color:'#7affea', glow:'#7affea', type:'orbitdown',
+        _cx:o.x, _cy:o.y, _baseAngle:baseAngle, _angSpeed:2.2, _radius:60, _descend:1.3, _t:0
+      });
+    }
+  }
+}
+
+function dmUpdateBullet(b, dt){
+  b.x += b.vx; b.y += b.vy;
+  if(b._settleColor && !b._settled && b.life > 0.12){
+    b.color = b._settleColor;
+    b.glow = b._settleColor;
+    b._settled = true;
+  }
+  if(b.type === 'petal'){
+    b.spin += 0.02;
+    b.vx += Math.cos(b.spin)*0.012;
+    b.vy += Math.sin(b.spin)*0.012;
+  } else if(b.type === 'zigzag'){
+    // 左右に振れながら進む（本来の進行方向に対して垂直に揺らす）
+    b._zigT = (b._zigT||0) + dt;
+    if(b._baseVx === undefined){ b._baseVx = b.vx; b._baseVy = b.vy; }
+    const speed = Math.hypot(b._baseVx, b._baseVy) || 1;
+    const perpX = -b._baseVy/speed, perpY = b._baseVx/speed;
+    const wobble = Math.sin(b._zigT * 7) * 1.6;
+    b.vx = b._baseVx + perpX*wobble;
+    b.vy = b._baseVy + perpY*wobble;
+  } else if(b.type === 'curve'){
+    // 一定時間かけて進行方向を左右どちらかへ緩やかに曲げる
+    b._curveT = (b._curveT||0) + dt;
+    const speed = Math.hypot(b.vx, b.vy) || 1;
+    const ang = Math.atan2(b.vy, b.vx) + (b._curveDir||1) * dt * 0.9;
+    b.vx = Math.cos(ang)*speed;
+    b.vy = Math.sin(ang)*speed;
+  } else if(b.type === 'orbitdown'){
+    // 中心点の周りを回転しつつ、その中心点自体がゆっくり下へ降りていく
+    b._t = (b._t||0) + dt;
+    const angle = b._baseAngle + b._t * b._angSpeed;
+    b.x = b._cx + Math.cos(angle) * b._radius;
+    b.y = b._cy + b._t * b._descend + Math.sin(angle) * b._radius;
+  }
+  b.life += dt;
+}
+function dmDrawBullet(ctx, b){
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  if(b.type === 'petal'){
+    ctx.rotate(b.spin||0);
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.color; ctx.shadowBlur = 8;
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      const a = i*(Math.PI*2/5);
+      const rr = i%2===0 ? b.r*1.8 : b.r*0.8;
+      ctx.lineTo(Math.cos(a)*rr, Math.sin(a)*rr);
+    }
+    ctx.closePath(); ctx.fill();
+  } else if(b.type === 'needle'){
+    const ang = Math.atan2(b.vy, b.vx);
+    ctx.rotate(ang);
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.glow || b.color; ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(b.r*2, 0); ctx.lineTo(-b.r*0.6, b.r*0.7); ctx.lineTo(-b.r*0.6, -b.r*0.7);
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.glow || b.color;
+    ctx.shadowBlur = 7;
+    ctx.beginPath(); ctx.arc(0,0,b.r,0,Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.beginPath(); ctx.arc(-b.r*0.3,-b.r*0.3,b.r*0.32,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+function dmUpdateLaser(l, dt){ l.life += dt; l.angle += l.angularVel; }
+function dmDrawLaser(ctx, l){
+  const active = l.life > l.warn;
+  ctx.save();
+  ctx.translate(l.x, l.y);
+  ctx.rotate(l.angle);
+  if(!active){
+    ctx.strokeStyle = 'rgba(255,90,46,0.3)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4,5]);
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(l.length,0); ctx.stroke();
+    ctx.setLineDash([]);
+  } else {
+    const grad = ctx.createLinearGradient(0,0,l.length,0);
+    grad.addColorStop(0, l.color);
+    grad.addColorStop(1, 'rgba(255,90,46,0)');
+    ctx.fillStyle = grad;
+    ctx.shadowColor = l.color; ctx.shadowBlur = 16;
+    ctx.fillRect(0,-l.width/2,l.length,l.width);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillRect(0,-1.5,l.length,3);
+  }
+  ctx.restore();
+}
+
+// ---- 弾幕なし: 何も表示しない ----
+const DmNone = function(){ /* 何もしない */ };
+
+// スペルカードの周回リスト（1枚が終わったら次のカードへ切り替わる）
+// 弾幕セット一覧（メニュー「背景変更」のチェックボックスに対応）
+const DANMAKU_SETS = [
+  { id:'none',           label:'弾幕なし',                            cards:[{ id:'none',           duration:20, fn:DmNone             }] },
+  { id:'fourofakind',   label:'弾幕A',       cards:[{ id:'fourofakind',   duration:20, fn:DmFourOfAKind     }] },
+  { id:'laserRedirect', label:'弾幕B', cards:[{ id:'laserRedirect', duration:20, fn:Dm11LaserRedirect }] },
+  { id:'split',         label:'弾幕C',                   cards:[{ id:'split',         duration:20, fn:Dm12Split          }] },
+  { id:'spiral',         label:'弾幕D', cards:[{ id:'spiral',         duration:20, fn:Dm13Spiral        }] },
+  { id:'wave',           label:'弾幕E', cards:[{ id:'wave',           duration:20, fn:Dm15Wave           }] },
+  { id:'whirlpool',      label:'弾幕F', cards:[{ id:'whirlpool',      duration:20, fn:Dm20Whirlpool      }] },
+];
+const ALL_DM_PATTERN_FNS = [
+  DmFourOfAKind, Dm11LaserRedirect, Dm12Split,
+  Dm13Spiral, Dm15Wave, Dm20Whirlpool,
+];
+
+let enabledDmSets = new Set(['fourofakind']); // 初期状態はフォーオブアカインドのみ
+let DM_CARDS = DANMAKU_SETS[0].cards.slice();
+
+function buildActiveDmCards(){
+  const list = [];
+  DANMAKU_SETS.forEach(s=>{ if(enabledDmSets.has(s.id)) list.push(...s.cards); });
+  DM_CARDS = list.length ? list : DANMAKU_SETS[0].cards.slice();
+}
+
+function dmResetPatternTimers(){
+  ALL_DM_PATTERN_FNS.forEach(fn=>{
+    Object.keys(fn).forEach(k=>{ if(k[0] === '_') delete fn[k]; });
+  });
+}
+// ランダムにカードのインデックスを選ぶ。excludeIdx が指定され、選択肢が2つ以上あれば
+// 直前と同じものは選ばれないようにする（連続で同じ弾幕にならないようにする）。
+function dmPickRandomCardIndex(excludeIdx){
+  if(DM_CARDS.length <= 1) return 0;
+  let idx;
+  do {
+    idx = Math.floor(Math.random() * DM_CARDS.length);
+  } while(idx === excludeIdx);
+  return idx;
+}
+function dmSwitchToCard(idx){
+  dmCardIdx = idx;
+  dmCardElapsed = 0;
+  dmWaitRemaining = 0;
+  // 弾はクリアしない：既存の弾が自然に画面外へ流れて消えるまで残すことで、
+  // パターン切り替えが唐突にならず自然に見えるようにする。
+  // レーザーは（回転が止まって固まったまま残ってしまうため）即座にクリアする。
+  dmLasers = [];
+  dmResetPatternTimers();
+}
+
+function dmResize(){
+  if(!dmCanvas) return;
+  dmW = window.innerWidth; dmH = window.innerHeight;
+  dmCanvas.width = dmW; dmCanvas.height = dmH;
+}
+
+function dmLoop(ts){
+  const dt = dmLastT ? Math.min((ts-dmLastT)/1000, 0.033) : 0.016;
+  dmLastT = ts;
+  dmElapsed += dt;
+
+  dmCtx.clearRect(0,0,dmW,dmH);
+
+  if(dmWaitRemaining > 0){
+    // 待機中：新しい弾は出さず、既存の弾だけが自然に流れて消えていく
+    dmWaitRemaining -= dt;
+    if(dmWaitRemaining <= 0){
+      dmWaitRemaining = 0;
+      dmSwitchToCard(dmPickRandomCardIndex(dmCardIdx));
+    }
+  } else {
+    const card = DM_CARDS[dmCardIdx] || DM_CARDS[0];
+    dmCardElapsed += dt;
+    card.fn(dmCardElapsed, dt);
+    if(DM_CARDS.length > 1 && dmCardElapsed >= card.duration){
+      dmLasers = []; // レーザーは待機に入る前に即座にクリア
+      if(card.id === 'laserRedirect'){
+        // 弾幕A：待機に入る瞬間、水色の弾（まだ軌道変化していない弾）は即座に消す
+        dmBullets = dmBullets.filter(b => b.color !== '#8fd9ff');
+      }
+      dmWaitRemaining = DM_SWITCH_WAIT_SEC;
+    }
+  }
+
+  for(let i=dmBullets.length-1;i>=0;i--){
+    const b = dmBullets[i];
+    dmUpdateBullet(b, dt);
+    if(b.x<-40||b.x>dmW+40||b.y<-40||b.y>dmH+40){ dmBullets.splice(i,1); continue; }
+    dmDrawBullet(dmCtx, b);
+  }
+  for(let i=dmLasers.length-1;i>=0;i--){
+    const l = dmLasers[i];
+    dmUpdateLaser(l, dt);
+    dmDrawLaser(dmCtx, l);
+    if(l.life > l.maxLife) dmLasers.splice(i,1);
+  }
+
+  dmAnimId = requestAnimationFrame(dmLoop);
+}
+
+async function initDanmakuCanvas(sky){
+  dmCanvas = document.createElement('canvas');
+  dmCanvas.id = 'danmakuCanvas';
+  sky.appendChild(dmCanvas);
+  dmCtx = dmCanvas.getContext('2d');
+  dmResize();
+  window.addEventListener('resize', dmResize);
+
+  const saved = await storeGet('danmakuSets');
+  if(Array.isArray(saved) && saved.length){
+    enabledDmSets = new Set(saved.filter(id=>DANMAKU_SETS.some(s=>s.id===id)));
+    if(!enabledDmSets.size) enabledDmSets = new Set(['fourofakind']);
+  }
+  buildActiveDmCards();
+
+  dmSwitchToCard(dmPickRandomCardIndex(-1));
+  dmAnimId = requestAnimationFrame(dmLoop);
+}
+
+function initSky(){
+  const sky = document.getElementById('sky');
+  const frag = document.createDocumentFragment();
+
+  const wash = document.createElement('div'); wash.className = 'sky-wash'; frag.appendChild(wash);
+  frag.appendChild(buildConstellations());
+
+  // 遠景の惑星（宇宙感の演出）
+  const planetSpots = [
+    { top:'8%',  left:'86%' },
+    { top:'62%', left:'6%'  },
+  ];
+  PLANET_STYLES.slice(0,2).forEach((ps, i)=>{
+    const p = document.createElement('div');
+    p.className = 'planet';
+    Object.assign(p.style, {
+      top: planetSpots[i].top, left: planetSpots[i].left,
+      width: ps.size+'px', height: ps.size+'px',
+      background: ps.color,
+      boxShadow: `0 0 ${ps.size*0.9}px ${ps.size*0.28}px ${ps.glow}`,
+    });
+    p.style.setProperty('--pring', ps.ring);
+    frag.appendChild(p);
+  });
+
+  for(let i=0;i<90;i++){
+    const s = document.createElement('div');
+    s.className='star far';
+    s.style.left = Math.random()*100+'%';
+    s.style.top = Math.random()*80+'%';
+    s.style.setProperty('--peak', (0.7+Math.random()*0.3).toFixed(2));
+    s.style.animationDuration = (4+Math.random()*3)+'s';
+    s.style.animationDelay = (Math.random()*5)+'s';
+    frag.appendChild(s);
+  }
+  for(let i=0;i<34;i++){
+    const s = document.createElement('div');
+    s.className='star near';
+    s.style.left = Math.random()*100+'%';
+    s.style.top = Math.random()*75+'%';
+    s.style.setProperty('--peak', (0.9+Math.random()*0.1).toFixed(2));
+    s.style.animationDuration = (3+Math.random()*3)+'s';
+    s.style.animationDelay = (Math.random()*5)+'s';
+    frag.appendChild(s);
+  }
+
+  const vignette = document.createElement('div'); vignette.className = 'vignette';
+  sky.appendChild(frag);
+
+  // 弾幕：提供されたスペルカード演習ゲームから移植した canvas 弾幕（キャラクターなし）
+  initDanmakuCanvas(sky);
+
+  sky.appendChild(vignette);
+}
+
+// ---------- init ----------
+(async function init(){
+  const legacyNoToId = {};
+  const savedState = await storeGet('trackState');
+  if(savedState && savedState.order && savedState.tracksById){
+    order = savedState.order;
+    tracksById = savedState.tracksById;
+  } else {
+    order = RAW_DATA.map(d => 'b' + d.no);
+    tracksById = {};
+    for(const d of RAW_DATA){
+      tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec };
+    }
+    // 旧バージョン（customTracks キー）からの移行
+    const legacyCustom = await storeGet('customTracks');
+    if(Array.isArray(legacyCustom) && legacyCustom.length){
+      for(const t of legacyCustom){
+        const id = makeId();
+        tracksById[id] = { title: t.title, circle: t.circle || '', orig: t.orig || '', sec: t.sec };
+        order.push(id);
+        if(t.no !== undefined) legacyNoToId[t.no] = id;
+      }
+    }
+    await persistTrackState();
+  }
+  rebuildData();
+
+  const savedFav = await storeGet('favorites');
+  if(Array.isArray(savedFav) && savedFav.length){
+    if(typeof savedFav[0] === 'number'){
+      // 旧バージョン（No.ベース）のお気に入りを id ベースへ移行
+      for(const n of savedFav){
+        const baseId = 'b' + n;
+        if(tracksById[baseId]) favorites.add(baseId);
+        else if(legacyNoToId[n]) favorites.add(legacyNoToId[n]);
+      }
+      await persistFavorites();
+    } else {
+      favorites = new Set(savedFav);
+    }
+  }
+
+  updateArrows();
+  initSky();
+  render();
+
+  // PWA用 Service Worker 登録（https / localhost などの安全なコンテキストでのみ有効。
+  // file:// で開いている場合は登録できないため、失敗しても無視する）
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+})();
+</script>
+</body>
+</html>
