@@ -1,6 +1,6 @@
-const CACHE_NAME = 'touhou-vocal-v1';
+const CACHE_NAME = 'touhou-vocal-v2';
 const APP_SHELL = [
-  './touhou_vocal_collection.html',
+  './index.html',
   './styles.css',
   './data.js',
   './manifest.json',
