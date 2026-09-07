@@ -1,4 +1,4 @@
-const CACHE_NAME = 'touhou-vocal-v2';
+const CACHE_NAME = 'touhou-vocal-v4';
 const APP_SHELL = [
   './index.html',
   './styles.css',

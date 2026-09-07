@@ -124,6 +124,7 @@
       <input type="text" id="searchInput" placeholder='曲名・サークル・原曲で検索' autocomplete="off">
       <button type="button" class="search-clear-btn" id="searchClearBtn" aria-label="検索文字を消去" style="display:none;">×</button>
     </div>
+    <button type="button" class="yt-search-btn" id="ytSearchBtn" title="検索欄に「No.80」「80」などNo.を入力してから押すと、その曲をYouTubeで検索します">▶ YouTube</button>
     <select id="sortSelect">
       <option value="no">並び替え: 登録順</option>
       <option value="sec">並び替え: 尺の短い順</option>
@@ -607,6 +608,32 @@ resultLine.addEventListener('click', e=>{
   render();
 });
 
+// 検索欄の文字列から「No.80」「80」「No80」等を解釈し、該当する曲を返す（見つからなければnull）
+function resolveTrackFromSearchInput(){
+  const raw = searchInput.value.trim();
+  const m = raw.match(/(?:no\.?\s*)?(\d+)/i);
+  if(!m) return null;
+  const no = parseInt(m[1], 10);
+  return data.find(d => d.no === no) || null;
+}
+
+const ytSearchBtn = document.getElementById('ytSearchBtn');
+
+// 検索欄の内容が変わるたびに、有効なNo.が見つかるかどうかでボタンの有効/無効を切り替える
+function updateYtSearchBtnState(){
+  const track = resolveTrackFromSearchInput();
+  ytSearchBtn.disabled = !track;
+}
+searchInput.addEventListener('input', updateYtSearchBtnState);
+updateYtSearchBtnState(); // 初期状態を反映
+
+ytSearchBtn.addEventListener('click', ()=>{
+  const track = resolveTrackFromSearchInput();
+  if(!track) return; // 無効な状態では押せないはずだが念のためガード
+  const query = [track.title, track.circle].filter(Boolean).join(' ');
+  window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(query), '_blank', 'noopener');
+});
+
 document.querySelectorAll('th button[data-sort]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     const key = btn.dataset.sort;
@@ -665,6 +692,7 @@ function buildDetailViewHtml(t){
       <div class="field"><div class="flabel">尺</div><div class="fvalue">${fmtSec(t.sec)}</div></div>
       <div class="detail-actions">
         <button class="btn btn-ghost detail-fav-btn" data-id="${t.id}">${isFav ? '★ お気に入りから外す' : '☆ お気に入りに追加'}</button>
+        <button class="btn btn-ghost detail-yt-btn" data-title="${escapeHtml(t.title||'')}" data-circle="${escapeHtml(t.circle||'')}">▶ YouTube</button>
         <button class="btn btn-ghost detail-edit-btn" data-id="${t.id}">✎ 編集</button>
         <button class="btn btn-danger detail-delete-btn" data-id="${t.id}">🗑 削除</button>
       </div>
@@ -1125,7 +1153,7 @@ function buildCircleListHtml(multi){
     const list = Object.values(groups).sort((a,b)=>a.comps.join('\u3000').localeCompare(b.comps.join('\u3000'),'ja'));
     rowsHtml = list.map(g=>{
       const label = g.comps.join(' × ');
-      const fillVal = '"' + g.comps.join(' and ');
+      const fillVal = '"and ' + g.comps.join(' ');
       return `<button class="list-row" data-fill="${escapeHtml(fillVal)}"><span>${escapeHtml(label)}</span><span class="cnt">${g.count}</span></button>`;
     }).join('');
   }
@@ -1188,7 +1216,7 @@ function buildOrigListMultiHtml(){
   const list = Object.values(groups).sort((a,b)=>a.comps.join('\u3000').localeCompare(b.comps.join('\u3000'),'ja'));
   const rowsHtml = list.map(g=>{
     const label = g.comps.join(' / ');
-    const fillVal = '"' + g.comps.join(' and ');
+    const fillVal = '"and ' + g.comps.join(' ');
     return `<button class="list-row" data-fill="${escapeHtml(fillVal)}"><span>${escapeHtml(label)}</span><span class="cnt">${g.count}</span></button>`;
   }).join('') || '<div class="list-empty">該当する原曲がありません</div>';
   return `<input type="text" class="list-search" id="listSearchBox" placeholder="原曲名で絞り込み">
@@ -1306,6 +1334,31 @@ function buildOrigSongBarChart(){
     + (truncated ? `<p class="bar-chart-note">アレンジ数の多い上位${TOP_N}原曲を表示（全${totalOrigs.toLocaleString()}原曲中）</p>` : '');
 }
 
+function buildDurationBarChart(){
+  const counts = {};
+  const CAP_SEC = 12*60; // 12分以上はまとめて「12:00以上」にする
+  for(const d of data){
+    if(d.sec === null || d.sec === undefined) continue;
+    const bucketSec = Math.min(Math.floor(d.sec / 30) * 30, CAP_SEC);
+    counts[bucketSec] = (counts[bucketSec]||0) + 1;
+  }
+  const bucketSecs = Object.keys(counts).map(Number).sort((a,b)=>a-b);
+  if(!bucketSecs.length) return '<p class="bar-chart-empty">データがありません</p>';
+  const max = Math.max(...bucketSecs.map(s=>counts[s]));
+  const fmtBucketLabel = s => (s >= CAP_SEC ? `${Math.floor(CAP_SEC/60)}:00〜` : fmtSec(s));
+  const cols = bucketSecs.map(s => {
+    const count = counts[s];
+    const pct = (count / max * 100).toFixed(1);
+    return `
+    <div class="hist-col">
+      <div class="hist-count">${count}</div>
+      <div class="hist-bar-track"><div class="hist-bar" style="height:${pct}%"></div></div>
+      <div class="hist-label">${fmtBucketLabel(s)}</div>
+    </div>`;
+  }).join('');
+  return `<div class="hist-chart">${cols}</div>`;
+}
+
 function buildStatsHtml(){
   const total = data.length;
   const circleCount = uniqSorted(data.map(d=>d.circle)).length;
@@ -1335,10 +1388,12 @@ function buildStatsHtml(){
       <button type="button" class="bar-tab active" data-bartab="work">作品別 曲数</button>
       <button type="button" class="bar-tab" data-bartab="origsong">原曲別 曲数</button>
       <button type="button" class="bar-tab" data-bartab="circle">サークル別 曲数</button>
+      <button type="button" class="bar-tab" data-bartab="duration">尺の分布</button>
     </div>
     <div class="bar-panel" data-barpanel="work">${buildWorkBarChart()}</div>
     <div class="bar-panel" data-barpanel="origsong" style="display:none;">${buildOrigSongBarChart()}</div>
-    <div class="bar-panel" data-barpanel="circle" style="display:none;">${buildCircleBarChart()}</div>`;
+    <div class="bar-panel" data-barpanel="circle" style="display:none;">${buildCircleBarChart()}</div>
+    <div class="bar-panel" data-barpanel="duration" style="display:none;">${buildDurationBarChart()}</div>`;
 }
 
 // ----- modal delegated events (search box + row click-to-fill) -----
@@ -1388,6 +1443,13 @@ modalBody.addEventListener('click', async e=>{
   }
   const editBtn = e.target.closest('.detail-edit-btn');
   if(editBtn){ openTrackDetail(editBtn.dataset.id, 'edit'); return; }
+
+  const ytDetailBtn = e.target.closest('.detail-yt-btn');
+  if(ytDetailBtn){
+    const query = [ytDetailBtn.dataset.title, ytDetailBtn.dataset.circle].filter(Boolean).join(' ');
+    window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(query), '_blank', 'noopener');
+    return;
+  }
 
   const cancelBtn = e.target.closest('.detail-cancel-btn');
   if(cancelBtn){ openTrackDetail(cancelBtn.dataset.id, 'view'); return; }
@@ -1693,25 +1755,6 @@ function Dm15Wave(t, dt){
   }
 }
 
-// ---- 弾幕K: 螺旋降下弾幕（単一種類の弾が回転しながら下へ降りていく） ----
-function Dm20Whirlpool(t, dt){
-  const self = Dm20Whirlpool;
-  if(self._nextWave === undefined) self._nextWave = -10;
-  const o = dmPt(0.5, 0.1);
-  if(t >= self._nextWave){
-    self._nextWave = t + 0.15;
-    const n = 6;
-    const baseRot = t * 90; // 度/秒の基準回転角
-    for(let i=0;i<n;i++){
-      const baseAngle = (baseRot + i*(360/n)) * Math.PI/180;
-      dmSpawnBullet({
-        x:o.x, y:o.y, vx:0, vy:0, r:4.5, color:'#7affea', glow:'#7affea', type:'orbitdown',
-        _cx:o.x, _cy:o.y, _baseAngle:baseAngle, _angSpeed:2.2, _radius:60, _descend:1.3, _t:0
-      });
-    }
-  }
-}
-
 function dmUpdateBullet(b, dt){
   b.x += b.vx; b.y += b.vy;
   if(b._settleColor && !b._settled && b.life > 0.12){
@@ -1818,11 +1861,10 @@ const DANMAKU_SETS = [
   { id:'split',         label:'弾幕C',                   cards:[{ id:'split',         duration:20, fn:Dm12Split          }] },
   { id:'spiral',         label:'弾幕D', cards:[{ id:'spiral',         duration:20, fn:Dm13Spiral        }] },
   { id:'wave',           label:'弾幕E', cards:[{ id:'wave',           duration:20, fn:Dm15Wave           }] },
-  { id:'whirlpool',      label:'弾幕F', cards:[{ id:'whirlpool',      duration:20, fn:Dm20Whirlpool      }] },
 ];
 const ALL_DM_PATTERN_FNS = [
   DmFourOfAKind, Dm11LaserRedirect, Dm12Split,
-  Dm13Spiral, Dm15Wave, Dm20Whirlpool,
+  Dm13Spiral, Dm15Wave,
 ];
 
 let enabledDmSets = new Set(['fourofakind']); // 初期状態はフォーオブアカインドのみ
