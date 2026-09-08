@@ -2027,56 +2027,88 @@ function initSky(){
 }
 
 // ---------- init ----------
+// ---------- init ----------
 (async function init(){
-  const legacyNoToId = {};
-  const savedState = await storeGet('trackState');
-  if(savedState && savedState.order && savedState.tracksById){
-    order = savedState.order;
-    tracksById = savedState.tracksById;
-  } else {
-    order = RAW_DATA.map(d => 'b' + d.no);
-    tracksById = {};
-    for(const d of RAW_DATA){
-      tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec };
-    }
-    // 旧バージョン（customTracks キー）からの移行
-    const legacyCustom = await storeGet('customTracks');
-    if(Array.isArray(legacyCustom) && legacyCustom.length){
-      for(const t of legacyCustom){
-        const id = makeId();
-        tracksById[id] = { title: t.title, circle: t.circle || '', orig: t.orig || '', sec: t.sec };
-        order.push(id);
-        if(t.no !== undefined) legacyNoToId[t.no] = id;
-      }
-    }
-    await persistTrackState();
+
+  // ==========================================
+  // 常に最新の data.js を基準に読み込む
+  // localStorage の trackState は使用しない
+  // ==========================================
+
+  order = RAW_DATA.map(d => 'b' + d.no);
+
+  tracksById = {};
+
+  for(const d of RAW_DATA){
+
+    tracksById['b' + d.no] = {
+      title: d.title,
+      circle: d.circle || '',
+      orig: d.orig || '',
+      sec: d.sec
+    };
+
   }
+
+
+  // ==========================================
+  // 古い trackState を削除
+  // ==========================================
+
+  if(useLocalStorage){
+
+    try{
+      localStorage.removeItem(LS_PREFIX + 'trackState');
+      localStorage.removeItem(LS_PREFIX + 'customTracks');
+    }catch(e){}
+
+  }
+
+
+  // ==========================================
+  // データを画面用に再構築
+  // ==========================================
+
   rebuildData();
 
+
+  // ==========================================
+  // お気に入りはそのまま保存して使用
+  // 存在しない曲のお気に入りは無視
+  // ==========================================
+
   const savedFav = await storeGet('favorites');
+
   if(Array.isArray(savedFav) && savedFav.length){
-    if(typeof savedFav[0] === 'number'){
-      // 旧バージョン（No.ベース）のお気に入りを id ベースへ移行
-      for(const n of savedFav){
-        const baseId = 'b' + n;
-        if(tracksById[baseId]) favorites.add(baseId);
-        else if(legacyNoToId[n]) favorites.add(legacyNoToId[n]);
-      }
-      await persistFavorites();
-    } else {
-      favorites = new Set(savedFav);
-    }
+
+    favorites = new Set(
+      savedFav.filter(id => tracksById[id])
+    );
+
+    await persistFavorites();
+
   }
+
 
   updateArrows();
+
   initSky();
+
   render();
 
-  // PWA用 Service Worker 登録（https / localhost などの安全なコンテキストでのみ有効。
-  // file:// で開いている場合は登録できないため、失敗しても無視する）
+
+  // ==========================================
+  // Service Worker 登録
+  // ==========================================
+
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+    navigator.serviceWorker
+      .register('sw.js')
+      .catch(()=>{});
+
   }
+
 })();
 </script>
 </body>
