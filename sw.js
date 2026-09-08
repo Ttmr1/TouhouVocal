@@ -1,4 +1,5 @@
-const CACHE_NAME = 'touhou-vocal-v4';
+const CACHE_NAME = 'touhou-vocal-v5';
+
 const APP_SHELL = [
   './index.html',
   './styles.css',
@@ -10,33 +11,90 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(APP_SHELL))
+      .catch(() => {})
   );
+
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((key) => key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
+      )
     )
   );
+
   self.clients.claim();
 });
 
-// キャッシュ優先、なければネットワーク（オフラインでもアプリ本体は開けるようにする）
+
 self.addEventListener('fetch', (event) => {
+
   if (event.request.method !== 'GET') return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((res) => {
-          const resClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone)).catch(() => {});
-          return res;
+
+  const url = new URL(event.request.url);
+
+
+  // ==========================================
+  // data.js は常に最新版を取得する
+  // ==========================================
+  if (url.pathname.endsWith('/data.js')) {
+
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+
+          const responseClone = response.clone();
+
+          caches.open(CACHE_NAME)
+            .then((cache) => {
+              cache.put(event.request, responseClone);
+            });
+
+          return response;
+
         })
-        .catch(() => cached);
-    })
+        .catch(() => caches.match(event.request))
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // その他はキャッシュ優先
+  // ==========================================
+  event.respondWith(
+
+    caches.match(event.request)
+      .then((cached) => {
+
+        if (cached) {
+          return cached;
+        }
+
+        return fetch(event.request)
+          .then((response) => {
+
+            const responseClone = response.clone();
+
+            caches.open(CACHE_NAME)
+              .then((cache) => {
+                cache.put(event.request, responseClone);
+              });
+
+            return response;
+
+          });
+
+      })
+
   );
+
 });
