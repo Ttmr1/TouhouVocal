@@ -1,9 +1,8 @@
-const CACHE_NAME = 'touhou-vocal-v15';
+const CACHE_NAME = 'touhou-vocal-v20';
 
 const APP_SHELL = [
   './index.html',
   './styles.css',
-  './data.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -42,28 +41,26 @@ self.addEventListener('fetch', (event) => {
 
 
   // ==========================================
-  // data.js は常に最新版を取得する
+  // data.js は常に最新版をネットワークから取得
   // ==========================================
   if (url.pathname.endsWith('/data.js')) {
 
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
 
-          const responseClone = response.clone();
+      fetch(event.request, {
+        cache: 'reload'
+      })
+      .catch(() => {
 
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              cache.put(event.request, responseClone);
-            });
+        // オフラインの場合だけキャッシュを使用
+        return caches.match(event.request);
 
-          return response;
+      })
 
-        })
-        .catch(() => caches.match(event.request))
     );
 
     return;
+
   }
 
 
@@ -87,7 +84,8 @@ self.addEventListener('fetch', (event) => {
             caches.open(CACHE_NAME)
               .then((cache) => {
                 cache.put(event.request, responseClone);
-              });
+              })
+              .catch(() => {});
 
             return response;
 
