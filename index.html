@@ -1306,8 +1306,39 @@ async function decompressFromCode(code){
   }
   throw new Error('未対応のコード形式です');
 }
+function buildBaseTracksById(){
+  const baseById = {};
+  RAW_DATA.forEach(d=>{ baseById['b'+d.no] = { title:d.title, circle:d.circle||'', orig:d.orig||'', sec:(d.sec ?? null) }; });
+  return baseById;
+}
+function buildDefaultOrder(baseById, deletedSet, customIdsInOrder){
+  const reconstructed = [];
+  RAW_DATA.forEach(d=>{ const id = 'b'+d.no; if(!deletedSet.has(id)) reconstructed.push(id); });
+  reconstructed.push(...customIdsInOrder);
+  return reconstructed;
+}
 function buildTransferPayloadJson(){
-  return JSON.stringify({ v:1, order, tracksById, favorites:[...favorites] });
+  // 元の data.js（RAW_DATA）を基準に、変更・追加・削除された曲だけを記録する（v3形式）。
+  // さらに、並び替えをしていない場合（base側はNo.昇順のまま・新規/変更曲は末尾に追加されている状態）は
+  // order配列自体を省略できるため、通常の利用ではコードがかなり小さくなる。
+  const baseById = buildBaseTracksById();
+  const changed = {};
+  for(const id of order){
+    const t = tracksById[id];
+    const base = baseById[id];
+    if(!base || base.title !== t.title || base.circle !== t.circle || base.orig !== t.orig || base.sec !== t.sec){
+      changed[id] = t;
+    }
+  }
+  const deleted = Object.keys(baseById).filter(id => !(id in tracksById));
+  const deletedSet = new Set(deleted);
+  const customIdsInOrder = order.filter(id => !(id in baseById));
+  const defaultOrder = buildDefaultOrder(baseById, deletedSet, customIdsInOrder);
+  const orderMatchesDefault = defaultOrder.length === order.length && defaultOrder.every((id,i)=>id===order[i]);
+
+  const payload = { v:3, changed, deleted, favorites:[...favorites] };
+  if(!orderMatchesDefault) payload.order = order; // 並び替えがある時だけ明示的に含める
+  return JSON.stringify(payload);
 }
 
 function buildDataTransferHtml(){
@@ -1425,14 +1456,52 @@ async function applyTransferCode(code){
     if(msgEl) msgEl.textContent = 'コードを読み取れませんでした。正しいコードか確認してください。';
     return;
   }
-  if(!payload || !Array.isArray(payload.order) || !payload.tracksById){
+  if(!payload){
     if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
     return;
   }
-  if(!confirm(`このコードには${payload.order.length}曲のデータが含まれています。現在の登録・編集・削除・お気に入りの内容はすべて置き換わります。よろしいですか？`)) return;
 
-  order = payload.order;
-  tracksById = payload.tracksById;
+  let newOrder, newTracksById;
+  if(payload.v === 3){
+    if(!payload.changed || !Array.isArray(payload.deleted)){
+      if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
+      return;
+    }
+    const baseById = buildBaseTracksById();
+    const deletedSet = new Set(payload.deleted);
+    payload.deleted.forEach(id => { delete baseById[id]; });
+    newTracksById = Object.assign(baseById, payload.changed);
+    if(Array.isArray(payload.order)){
+      newOrder = payload.order;
+    } else {
+      // order省略時：base側はNo.昇順のまま、新規追加された曲（changedのうちbaseに無いid）を末尾に追加する
+      const customIdsInOrder = Object.keys(payload.changed).filter(id => !(id in buildBaseTracksById()));
+      newOrder = buildDefaultOrder(buildBaseTracksById(), deletedSet, customIdsInOrder);
+    }
+  } else if(payload.v === 2){
+    // 差分形式（order省略なし）：元のRAW_DATAを基準に、削除分を除いてから変更・追加分を上書きする
+    if(!payload.changed || !Array.isArray(payload.deleted) || !Array.isArray(payload.order)){
+      if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
+      return;
+    }
+    const baseById = buildBaseTracksById();
+    payload.deleted.forEach(id => { delete baseById[id]; });
+    newTracksById = Object.assign(baseById, payload.changed);
+    newOrder = payload.order;
+  } else {
+    // v1形式：フルデータ（後方互換）
+    if(!payload.tracksById || !Array.isArray(payload.order)){
+      if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
+      return;
+    }
+    newTracksById = payload.tracksById;
+    newOrder = payload.order;
+  }
+
+  if(!confirm(`このコードには${newOrder.length}曲のデータが含まれています。現在の登録・編集・削除・お気に入りの内容はすべて置き換わります。よろしいですか？`)) return;
+
+  order = newOrder;
+  tracksById = newTracksById;
   favorites = new Set(Array.isArray(payload.favorites) ? payload.favorites : []);
   rebuildData();
   await persistTrackState();
