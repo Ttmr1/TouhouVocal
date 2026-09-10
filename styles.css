@@ -294,11 +294,11 @@
   tbody tr:nth-child(even){ background:var(--bg-row-alt); }
   tbody tr{ cursor:pointer; }
   tbody tr:hover{ background: rgba(234,166,198,0.05); }
-  .col-no{ font-family:var(--font-display); color:var(--ink); font-size:12.5px; width:64px; }
-  .col-title{ color:var(--ink); font-weight:500; }
-  .col-circle{ color:var(--ink); }
-  .col-orig{ color:var(--ink); }
-  .col-sec{ color:var(--ink); font-variant-numeric: tabular-nums; width:56px; }
+  .col-no{ font-family:var(--font-display); color:var(--ink); font-size:12.5px; width:80px; }
+  .col-title{ color:var(--ink); font-weight:500; min-width:240px; }
+  .col-circle{ color:var(--ink); min-width:170px; }
+  .col-orig{ color:var(--ink); min-width:220px; }
+  .col-sec{ color:var(--ink); font-variant-numeric: tabular-nums; width:72px; }
   .col-fav{ width:40px; text-align:center; }
   .star-btn{ all:unset; cursor:pointer; font-size:16px; line-height:1; color:var(--ink); transition: color .15s, transform .15s; }
   .star-btn:hover{ transform:scale(1.15); color:var(--gold); }
