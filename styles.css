@@ -425,6 +425,13 @@
     width:16px; height:16px; accent-color:var(--gold); cursor:pointer; flex-shrink:0;
   }
 
+  .transfer-panel textarea{
+    background:var(--bg-2); color:var(--ink); border:1px solid var(--line); border-radius:8px;
+    padding:10px; font-family:monospace; line-height:1.5;
+  }
+  .transfer-panel textarea:focus{ outline:none; border-color:var(--gold-soft); }
+  #transferQrArea svg{ background:#fff; border-radius:8px; padding:8px; max-width:220px; height:auto; }
+
   @media (max-width:480px){ .bar-row{ grid-template-columns:64px 1fr 62px; } .bar-label{ font-size:10.5px; } .bar-count{ font-size:10px; } }
 
   /* flat list (circle / orig multi) */

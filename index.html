@@ -14,6 +14,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="東方Vocal">
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 </head>
 <body>
@@ -61,6 +63,8 @@
         </div>
       </div>
 
+      <button data-action="ytFavPlaylist">▶ お気に入りをYouTubeでまとめて開く</button>
+      <button data-modal="dataTransfer">データ引き継ぎ（QR／コード）</button>
       <button data-modal="bgSettings">背景変更</button>
     </div>
   </div>
@@ -921,7 +925,7 @@ function openModal(title, bodyHtml){
   modalBody.innerHTML = bodyHtml;
   modalBackdrop.classList.add('open');
 }
-function closeModal(){ modalBackdrop.classList.remove('open'); }
+function closeModal(){ modalBackdrop.classList.remove('open'); stopTransferScan(); }
 document.getElementById('modalClose').addEventListener('click', closeModal);
 modalBackdrop.addEventListener('click', e=>{ if(e.target === modalBackdrop) closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeModal(); });
@@ -951,6 +955,7 @@ document.querySelectorAll('.menu-dropdown button[data-modal]').forEach(btn=>{
     if(type === 'origSingle') openModal('原曲一覧（単）', buildOrigListSingleHtml());
     if(type === 'origMulti') openModal('原曲一覧（複）', buildOrigListMultiHtml());
     if(type === 'bgSettings') openModal('背景変更', buildBackgroundSettingsHtml());
+    if(type === 'dataTransfer'){ openModal('データ引き継ぎ', buildDataTransferHtml()); populateDataTransferExport(); }
   });
 });
 document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn=>{
@@ -959,8 +964,30 @@ document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn=>{
     if(btn.dataset.action === 'downloadData') await exportDataJs();
     if(btn.dataset.action === 'resetData') openModal('リセットの確認', buildResetConfirmHtml());
     if(btn.dataset.action === 'importData') importDataInput.click();
+    if(btn.dataset.action === 'ytFavPlaylist') openYtFavPlaylist();
   });
 });
+
+// お気に入りの曲を1曲ずつYouTube検索タブで開く（実際の動画IDが分からないため、
+// 本物のプレイリストではなく検索結果を複数タブで開く形。YouTube Data APIは不要）
+const YT_PLAYLIST_MAX = 10;
+function openYtFavPlaylist(){
+  const favTracks = data.filter(d => favorites.has(d.id));
+  if(!favTracks.length){
+    alert('お気に入りに登録された曲がありません。');
+    return;
+  }
+  const targets = favTracks.slice(0, YT_PLAYLIST_MAX);
+  const over = favTracks.length - targets.length;
+  const msg = `お気に入り${targets.length}曲をYouTube検索タブで開きます`
+    + (over > 0 ? `（上限${YT_PLAYLIST_MAX}曲のため、他${over}曲は開きません）` : '')
+    + '。よろしいですか？\n※ブラウザのポップアップブロックにより一部開かない場合があります。';
+  if(!confirm(msg)) return;
+  targets.forEach(t=>{
+    const query = [t.title, t.circle].filter(Boolean).join(' ');
+    window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(query), '_blank', 'noopener');
+  });
+}
 
 // 現在の全曲データ（登録・編集・削除を反映済み）を data.js として保存する
 // 対応ブラウザ（Chrome/Edge等）では File System Access API を使い、既存の data.js を選んで直接上書きできる。
@@ -1234,6 +1261,187 @@ function buildBackgroundSettingsHtml(){
     <p style="color:var(--ink-faint); font-size:11.5px; margin-top:12px;">チェックした弾幕が順番に背景に登場します。少なくとも1つは選択してください。</p>`;
 }
 
+// ----- データ引き継ぎ（QR／コード） -----
+// gzip圧縮→Base64化したコード文字列で、登録・編集・削除・お気に入りを丸ごと引き継ぐ。
+// 曲数が多いとQRコードの容量に収まらないことがあるため、その場合はコードのコピーのみ案内する。
+function arrayBufferToBase64(buf){
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function base64ToUint8Array(b64){
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+async function compressToCode(text){
+  const bytes = new TextEncoder().encode(text);
+  if(typeof CompressionStream === 'function'){
+    try{
+      const cs = new CompressionStream('gzip');
+      const writer = cs.writable.getWriter();
+      writer.write(bytes); writer.close();
+      const compressed = await new Response(cs.readable).arrayBuffer();
+      return 'TVGZ1:' + arrayBufferToBase64(compressed);
+    }catch(e){ /* フォールバックへ */ }
+  }
+  return 'TVRAW1:' + arrayBufferToBase64(bytes.buffer);
+}
+async function decompressFromCode(code){
+  const idx = code.indexOf(':');
+  if(idx === -1) throw new Error('コードの形式が正しくありません');
+  const tag = code.slice(0, idx);
+  const bytes = base64ToUint8Array(code.slice(idx+1));
+  if(tag === 'TVGZ1'){
+    if(typeof DecompressionStream !== 'function') throw new Error('このブラウザは展開に対応していません');
+    const ds = new DecompressionStream('gzip');
+    const writer = ds.writable.getWriter();
+    writer.write(bytes); writer.close();
+    const out = await new Response(ds.readable).arrayBuffer();
+    return new TextDecoder().decode(out);
+  } else if(tag === 'TVRAW1'){
+    return new TextDecoder().decode(bytes);
+  }
+  throw new Error('未対応のコード形式です');
+}
+function buildTransferPayloadJson(){
+  return JSON.stringify({ v:1, order, tracksById, favorites:[...favorites] });
+}
+
+function buildDataTransferHtml(){
+  return `
+    <div class="bar-tabs">
+      <button type="button" class="bar-tab active" data-transfertab="export">エクスポート</button>
+      <button type="button" class="bar-tab" data-transfertab="import">インポート</button>
+    </div>
+    <div class="transfer-panel" data-transferpanel="export">
+      <p style="color:var(--ink-faint); font-size:12px; margin:0 0 12px;">
+        現在の登録・編集・削除・お気に入りの状態を、QRコードまたはコードとして書き出します。曲数が多い場合はQRコードの容量を超えることがあり、その場合はコードのみ表示されます。
+      </p>
+      <div id="transferQrArea" style="display:flex; justify-content:center; margin-bottom:12px;"><span style="color:var(--ink-faint); font-size:12.5px;">生成中…</span></div>
+      <textarea id="transferExportCode" readonly rows="5" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="生成中…"></textarea>
+      <button type="button" class="btn btn-primary" id="transferCopyBtn" style="margin-top:10px; width:100%;">コードをコピー</button>
+    </div>
+    <div class="transfer-panel" data-transferpanel="import" style="display:none;">
+      <p style="color:var(--ink-faint); font-size:12px; margin:0 0 12px;">
+        別の端末で書き出したコードを貼り付けるか、QRコードをカメラで読み取ってください。適用すると現在のデータは上書きされます。
+      </p>
+      <textarea id="transferImportCode" rows="5" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="ここにコードを貼り付け"></textarea>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button type="button" class="btn btn-primary" id="transferImportBtn" style="flex:1;">このコードを適用する</button>
+        <button type="button" class="btn btn-ghost" id="transferScanBtn" style="flex:1;">📷 QRを読み取る</button>
+      </div>
+      <video id="transferScanVideo" playsinline style="display:none; width:100%; margin-top:10px; border-radius:8px;"></video>
+      <div id="transferImportMsg" style="margin-top:10px; font-size:12.5px;"></div>
+    </div>`;
+}
+
+async function populateDataTransferExport(){
+  const codeEl = document.getElementById('transferExportCode');
+  const qrEl = document.getElementById('transferQrArea');
+  if(!codeEl) return; // モーダルが既に閉じられた場合
+  const json = buildTransferPayloadJson();
+  const code = await compressToCode(json);
+  if(!document.getElementById('transferExportCode')) return; // 生成中に閉じられた場合
+  codeEl.value = code;
+
+  if(typeof qrcode !== 'function'){
+    qrEl.innerHTML = '<span style="color:var(--ink-faint); font-size:12.5px;">QRライブラリを読み込めませんでした（コードは利用できます）</span>';
+    return;
+  }
+  try{
+    const qr = qrcode(0, 'L');
+    qr.addData(code);
+    qr.make();
+    qrEl.innerHTML = qr.createSvgTag({ cellSize:4, margin:4 });
+  }catch(e){
+    qrEl.innerHTML = '<span style="color:var(--ink-faint); font-size:12.5px;">曲数が多いためQRコードには収まりませんでした。下のコードをコピーしてご利用ください。</span>';
+  }
+}
+
+let transferScanStream = null;
+function stopTransferScan(){
+  if(transferScanStream){
+    transferScanStream.getTracks().forEach(t=>t.stop());
+    transferScanStream = null;
+  }
+  const video = document.getElementById('transferScanVideo');
+  if(video) video.style.display = 'none';
+}
+
+async function startTransferScan(){
+  const video = document.getElementById('transferScanVideo');
+  const msgEl = document.getElementById('transferImportMsg');
+  if(!video) return;
+  if(typeof jsQR !== 'function'){
+    if(msgEl) msgEl.textContent = 'QR読み取りライブラリを読み込めませんでした。コードを貼り付けてください。';
+    return;
+  }
+  try{
+    transferScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(e){
+    if(msgEl) msgEl.textContent = 'カメラを利用できませんでした。コードを貼り付けてください。';
+    return;
+  }
+  video.srcObject = transferScanStream;
+  video.style.display = 'block';
+  await video.play();
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  function tick(){
+    if(!transferScanStream) return; // 途中で停止された
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const result = jsQR(imgData.data, imgData.width, imgData.height);
+      if(result && result.data){
+        stopTransferScan();
+        const importEl = document.getElementById('transferImportCode');
+        if(importEl) importEl.value = result.data;
+        if(msgEl) msgEl.textContent = 'QRコードを読み取りました。「このコードを適用する」を押してください。';
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+async function applyTransferCode(code){
+  const msgEl = document.getElementById('transferImportMsg');
+  if(!code || !code.trim()){
+    if(msgEl) msgEl.textContent = 'コードが入力されていません。';
+    return;
+  }
+  let payload;
+  try{
+    const json = await decompressFromCode(code.trim());
+    payload = JSON.parse(json);
+  }catch(e){
+    if(msgEl) msgEl.textContent = 'コードを読み取れませんでした。正しいコードか確認してください。';
+    return;
+  }
+  if(!payload || !Array.isArray(payload.order) || !payload.tracksById){
+    if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
+    return;
+  }
+  if(!confirm(`このコードには${payload.order.length}曲のデータが含まれています。現在の登録・編集・削除・お気に入りの内容はすべて置き換わります。よろしいですか？`)) return;
+
+  order = payload.order;
+  tracksById = payload.tracksById;
+  favorites = new Set(Array.isArray(payload.favorites) ? payload.favorites : []);
+  rebuildData();
+  await persistTrackState();
+  await persistFavorites();
+  render();
+  stopTransferScan();
+  closeModal();
+}
+
 // ----- 検索ヒント -----
 function buildHintHtml(){
   const hints = [
@@ -1419,6 +1627,45 @@ modalBody.addEventListener('input', e=>{
   });
 });
 modalBody.addEventListener('click', async e=>{
+  const transferTab = e.target.closest('[data-transfertab]');
+  if(transferTab){
+    const target = transferTab.dataset.transfertab;
+    modalBody.querySelectorAll('[data-transfertab]').forEach(b=>b.classList.toggle('active', b===transferTab));
+    modalBody.querySelectorAll('.transfer-panel').forEach(p=>{
+      p.style.display = (p.dataset.transferpanel === target) ? 'block' : 'none';
+    });
+    if(target !== 'import') stopTransferScan();
+    return;
+  }
+
+  if(e.target.closest('#transferCopyBtn')){
+    const codeEl = document.getElementById('transferExportCode');
+    const btn = e.target.closest('#transferCopyBtn');
+    if(codeEl && codeEl.value){
+      try{
+        await navigator.clipboard.writeText(codeEl.value);
+        const original = btn.textContent;
+        btn.textContent = 'コピーしました';
+        setTimeout(()=>{ if(btn.isConnected) btn.textContent = original; }, 1500);
+      }catch(e2){
+        codeEl.select();
+        alert('自動コピーに失敗しました。選択されたコードを手動でコピーしてください。');
+      }
+    }
+    return;
+  }
+
+  if(e.target.closest('#transferImportBtn')){
+    const importEl = document.getElementById('transferImportCode');
+    await applyTransferCode(importEl ? importEl.value : '');
+    return;
+  }
+
+  if(e.target.closest('#transferScanBtn')){
+    startTransferScan();
+    return;
+  }
+
   const barTab = e.target.closest('.bar-tab');
   if(barTab){
     const target = barTab.dataset.bartab;
@@ -2027,88 +2274,56 @@ function initSky(){
 }
 
 // ---------- init ----------
-// ---------- init ----------
 (async function init(){
-
-  // ==========================================
-  // 常に最新の data.js を基準に読み込む
-  // localStorage の trackState は使用しない
-  // ==========================================
-
-  order = RAW_DATA.map(d => 'b' + d.no);
-
-  tracksById = {};
-
-  for(const d of RAW_DATA){
-
-    tracksById['b' + d.no] = {
-      title: d.title,
-      circle: d.circle || '',
-      orig: d.orig || '',
-      sec: d.sec
-    };
-
+  const legacyNoToId = {};
+  const savedState = await storeGet('trackState');
+  if(savedState && savedState.order && savedState.tracksById){
+    order = savedState.order;
+    tracksById = savedState.tracksById;
+  } else {
+    order = RAW_DATA.map(d => 'b' + d.no);
+    tracksById = {};
+    for(const d of RAW_DATA){
+      tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec };
+    }
+    // 旧バージョン（customTracks キー）からの移行
+    const legacyCustom = await storeGet('customTracks');
+    if(Array.isArray(legacyCustom) && legacyCustom.length){
+      for(const t of legacyCustom){
+        const id = makeId();
+        tracksById[id] = { title: t.title, circle: t.circle || '', orig: t.orig || '', sec: t.sec };
+        order.push(id);
+        if(t.no !== undefined) legacyNoToId[t.no] = id;
+      }
+    }
+    await persistTrackState();
   }
-
-
-  // ==========================================
-  // 古い trackState を削除
-  // ==========================================
-
-  if(useLocalStorage){
-
-    try{
-      localStorage.removeItem(LS_PREFIX + 'trackState');
-      localStorage.removeItem(LS_PREFIX + 'customTracks');
-    }catch(e){}
-
-  }
-
-
-  // ==========================================
-  // データを画面用に再構築
-  // ==========================================
-
   rebuildData();
 
-
-  // ==========================================
-  // お気に入りはそのまま保存して使用
-  // 存在しない曲のお気に入りは無視
-  // ==========================================
-
   const savedFav = await storeGet('favorites');
-
   if(Array.isArray(savedFav) && savedFav.length){
-
-    favorites = new Set(
-      savedFav.filter(id => tracksById[id])
-    );
-
-    await persistFavorites();
-
+    if(typeof savedFav[0] === 'number'){
+      // 旧バージョン（No.ベース）のお気に入りを id ベースへ移行
+      for(const n of savedFav){
+        const baseId = 'b' + n;
+        if(tracksById[baseId]) favorites.add(baseId);
+        else if(legacyNoToId[n]) favorites.add(legacyNoToId[n]);
+      }
+      await persistFavorites();
+    } else {
+      favorites = new Set(savedFav);
+    }
   }
-
 
   updateArrows();
-
   initSky();
-
   render();
 
-
-  // ==========================================
-  // Service Worker 登録
-  // ==========================================
-
+  // PWA用 Service Worker 登録（https / localhost などの安全なコンテキストでのみ有効。
+  // file:// で開いている場合は登録できないため、失敗しても無視する）
   if('serviceWorker' in navigator){
-
-    navigator.serviceWorker
-      .register('sw.js')
-      .catch(()=>{});
-
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
   }
-
 })();
 </script>
 </body>
