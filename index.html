@@ -63,7 +63,7 @@
         </div>
       </div>
 
-      <button data-action="ytFavPlaylist">▶ お気に入りをYouTubeでまとめて開く</button>
+      <button data-modal="replaceText">文字の置換</button>
       <button data-modal="dataTransfer">データ引き継ぎ（QR／コード）</button>
       <button data-modal="bgSettings">背景変更</button>
     </div>
@@ -115,6 +115,7 @@
     </div>
     <datalist id="circleDatalist"></datalist>
     <datalist id="origDatalist"></datalist>
+    <datalist id="circleOrigDatalist"></datalist>
     <div class="register-hint">曲名以外は空欄でも登録できます。空欄の項目は「検索ヒント」の "不明" 検索で一覧できます。</div>
     <div class="edit-error" id="regError" style="display:none;"></div>
     <div class="register-actions">
@@ -250,6 +251,7 @@ function rebuildData(){
 function refreshDatalists(){
   const circleListEl = document.getElementById('circleDatalist');
   const origListEl = document.getElementById('origDatalist');
+  const circleOrigListEl = document.getElementById('circleOrigDatalist');
   if(!circleListEl || !origListEl) return;
   const circleSet = new Set();
   const origSet = new Set();
@@ -260,6 +262,10 @@ function refreshDatalists(){
   const toOptions = set => [...set].sort((a,b)=>a.localeCompare(b,'ja')).map(v=>`<option value="${escapeHtml(v)}">`).join('');
   circleListEl.innerHTML = toOptions(circleSet);
   origListEl.innerHTML = toOptions(origSet);
+  if(circleOrigListEl){
+    const combined = new Set([...circleSet, ...origSet]);
+    circleOrigListEl.innerHTML = toOptions(combined);
+  }
 }
 function makeId(){ return 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
 
@@ -955,6 +961,7 @@ document.querySelectorAll('.menu-dropdown button[data-modal]').forEach(btn=>{
     if(type === 'origSingle') openModal('原曲一覧（単）', buildOrigListSingleHtml());
     if(type === 'origMulti') openModal('原曲一覧（複）', buildOrigListMultiHtml());
     if(type === 'bgSettings') openModal('背景変更', buildBackgroundSettingsHtml());
+    if(type === 'replaceText') openModal('文字の置換', buildReplaceTextHtml());
     if(type === 'dataTransfer'){ openModal('データ引き継ぎ', buildDataTransferHtml()); populateDataTransferExport(); }
   });
 });
@@ -964,30 +971,8 @@ document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn=>{
     if(btn.dataset.action === 'downloadData') await exportDataJs();
     if(btn.dataset.action === 'resetData') openModal('リセットの確認', buildResetConfirmHtml());
     if(btn.dataset.action === 'importData') importDataInput.click();
-    if(btn.dataset.action === 'ytFavPlaylist') openYtFavPlaylist();
   });
 });
-
-// お気に入りの曲を1曲ずつYouTube検索タブで開く（実際の動画IDが分からないため、
-// 本物のプレイリストではなく検索結果を複数タブで開く形。YouTube Data APIは不要）
-const YT_PLAYLIST_MAX = 10;
-function openYtFavPlaylist(){
-  const favTracks = data.filter(d => favorites.has(d.id));
-  if(!favTracks.length){
-    alert('お気に入りに登録された曲がありません。');
-    return;
-  }
-  const targets = favTracks.slice(0, YT_PLAYLIST_MAX);
-  const over = favTracks.length - targets.length;
-  const msg = `お気に入り${targets.length}曲をYouTube検索タブで開きます`
-    + (over > 0 ? `（上限${YT_PLAYLIST_MAX}曲のため、他${over}曲は開きません）` : '')
-    + '。よろしいですか？\n※ブラウザのポップアップブロックにより一部開かない場合があります。';
-  if(!confirm(msg)) return;
-  targets.forEach(t=>{
-    const query = [t.title, t.circle].filter(Boolean).join(' ');
-    window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(query), '_blank', 'noopener');
-  });
-}
 
 // 現在の全曲データ（登録・編集・削除を反映済み）を data.js として保存する
 // 対応ブラウザ（Chrome/Edge等）では File System Access API を使い、既存の data.js を選んで直接上書きできる。
@@ -1248,6 +1233,109 @@ function buildOrigListMultiHtml(){
   }).join('') || '<div class="list-empty">該当する原曲がありません</div>';
   return `<input type="text" class="list-search" id="listSearchBox" placeholder="原曲名で絞り込み">
     <div class="flat-list" id="flatListBody">${rowsHtml}</div>`;
+}
+
+// ----- 文字の置換（Excelのctrl+Hのような機能） -----
+function buildReplaceTextHtml(){
+  return `
+    <div class="replace-panel">
+      <div class="edit-field">
+        <label>検索する文字列</label>
+        <input type="text" id="replaceFindInput" list="circleOrigDatalist" placeholder="例）サンプル商会" autocomplete="off">
+      </div>
+      <div class="edit-field">
+        <label>置換後の文字列</label>
+        <input type="text" id="replaceWithInput" list="circleOrigDatalist" placeholder="例）サンプル商会（改）" autocomplete="off">
+      </div>
+      <div class="replace-targets">
+        <span class="replace-targets-label">対象</span>
+        <label class="replace-target-item"><input type="checkbox" id="replaceTargetTitle" checked> 曲名</label>
+        <label class="replace-target-item"><input type="checkbox" id="replaceTargetCircle" checked> サークル</label>
+        <label class="replace-target-item"><input type="checkbox" id="replaceTargetOrig" checked> 原曲</label>
+      </div>
+      <div class="edit-error" id="replaceError" style="display:none;"></div>
+      <div id="replacePreviewArea"></div>
+      <div class="detail-actions">
+        <button class="btn btn-ghost" id="replaceCancelBtn">閉じる</button>
+        <button class="btn btn-ghost" id="replacePreviewBtn">検索</button>
+        <button class="btn btn-primary" id="replaceExecuteBtn">すべて置換</button>
+      </div>
+    </div>`;
+}
+function getReplaceTargets(){
+  return {
+    title: !!document.getElementById('replaceTargetTitle')?.checked,
+    circle: !!document.getElementById('replaceTargetCircle')?.checked,
+    orig: !!document.getElementById('replaceTargetOrig')?.checked,
+  };
+}
+function findReplaceMatches(findStr, targets){
+  if(!findStr) return [];
+  const matches = [];
+  for(const d of data){
+    const hits = [];
+    if(targets.title && d.title && d.title.includes(findStr)) hits.push('title');
+    if(targets.circle && d.circle && d.circle.includes(findStr)) hits.push('circle');
+    if(targets.orig && d.orig && d.orig.includes(findStr)) hits.push('orig');
+    if(hits.length) matches.push({ id:d.id, no:d.no, title:d.title, hits });
+  }
+  return matches;
+}
+const REPLACE_TARGET_LABEL = { title:'曲名', circle:'サークル', orig:'原曲' };
+function buildReplacePreviewHtml(matches){
+  if(!matches.length) return '<div class="list-empty">一致する曲が見つかりませんでした</div>';
+  const rows = matches.map(m=>
+    `<div class="replace-hit-row"><span class="replace-hit-no">No.${String(m.no).padStart(4,'0')}</span><span class="replace-hit-title">${escapeHtml(m.title)}</span><span class="replace-hit-fields">${m.hits.map(h=>REPLACE_TARGET_LABEL[h]).join('・')}</span></div>`
+  ).join('');
+  return `<div class="replace-preview-count">${matches.length}件ヒット</div><div class="replace-hit-list">${rows}</div>`;
+}
+function readReplaceInputs(){
+  const findStr = document.getElementById('replaceFindInput').value;
+  const withStr = document.getElementById('replaceWithInput').value;
+  const errEl = document.getElementById('replaceError');
+  errEl.style.display = 'none';
+  if(!findStr){
+    errEl.textContent = '検索する文字列を入力してください';
+    errEl.style.display = 'block';
+    return null;
+  }
+  const targets = getReplaceTargets();
+  if(!targets.title && !targets.circle && !targets.orig){
+    errEl.textContent = '対象を1つ以上選択してください';
+    errEl.style.display = 'block';
+    return null;
+  }
+  return { findStr, withStr, targets };
+}
+function previewReplace(){
+  const input = readReplaceInputs();
+  const previewEl = document.getElementById('replacePreviewArea');
+  if(!input){ previewEl.innerHTML = ''; return; }
+  const matches = findReplaceMatches(input.findStr, input.targets);
+  previewEl.innerHTML = buildReplacePreviewHtml(matches);
+}
+async function executeReplace(){
+  const input = readReplaceInputs();
+  const previewEl = document.getElementById('replacePreviewArea');
+  if(!input) return;
+  const { findStr, withStr, targets } = input;
+  const matches = findReplaceMatches(findStr, targets);
+  if(!matches.length){
+    previewEl.innerHTML = buildReplacePreviewHtml(matches);
+    return;
+  }
+  if(!confirm(`${matches.length}件の曲で「${findStr}」を「${withStr}」に置換します。よろしいですか？`)) return;
+  for(const m of matches){
+    const t = tracksById[m.id];
+    if(!t) continue;
+    if(m.hits.includes('title')) t.title = t.title.split(findStr).join(withStr);
+    if(m.hits.includes('circle')) t.circle = t.circle.split(findStr).join(withStr);
+    if(m.hits.includes('orig')) t.orig = t.orig.split(findStr).join(withStr);
+  }
+  rebuildData();
+  await persistTrackState();
+  render();
+  previewEl.innerHTML = `<div class="replace-success">${matches.length}件を置換しました。</div>`;
 }
 
 // ----- 背景変更（弾幕セットの選択） -----
@@ -1782,6 +1870,10 @@ modalBody.addEventListener('click', async e=>{
   const delConfirmBtn = e.target.closest('.detail-delete-confirm-btn');
   if(delConfirmBtn){ await performDelete(delConfirmBtn.dataset.id); return; }
 
+  if(e.target.closest('#replaceCancelBtn')){ closeModal(); return; }
+  if(e.target.closest('#replacePreviewBtn')){ previewReplace(); return; }
+  if(e.target.closest('#replaceExecuteBtn')){ await executeReplace(); return; }
+
   if(e.target.closest('#resetCancelBtn')){ closeModal(); return; }
   if(e.target.closest('#resetConfirmBtn')){ await performDataReset(); return; }
   if(e.target.closest('#importCancelBtn')){ pendingImportArr = null; closeModal(); return; }
@@ -2218,10 +2310,41 @@ function dmSwitchToCard(idx){
   dmResetPatternTimers();
 }
 
+// リサイズ時、既存の弾・レーザーを新旧サイズの比率で座標変換することで、
+// ウィンドウサイズ変更の瞬間に弾が画面上の変な位置へ飛んだり見えたりしないようにする。
 function dmResize(){
   if(!dmCanvas) return;
-  dmW = window.innerWidth; dmH = window.innerHeight;
+  const newW = window.innerWidth, newH = window.innerHeight;
+  if(newW === dmW && newH === dmH) return; // サイズが変わっていなければ何もしない
+
+  if(dmW > 0 && dmH > 0){
+    const scaleX = newW / dmW, scaleY = newH / dmH;
+    dmBullets.forEach(b=>{
+      b.x *= scaleX; b.y *= scaleY;
+      if(typeof b.vx === 'number') b.vx *= scaleX;
+      if(typeof b.vy === 'number') b.vy *= scaleY;
+    });
+    dmLasers.forEach(l=>{
+      if(typeof l.x === 'number') l.x *= scaleX;
+      if(typeof l.y === 'number') l.y *= scaleY;
+    });
+  }
+
+  dmW = newW; dmH = newH;
   dmCanvas.width = dmW; dmCanvas.height = dmH;
+}
+
+// resize イベントはウィンドウ枠をドラッグしている間、非常に高頻度で発火するため、
+// その都度 dmResize（canvas幅高さの書き換え）を行うとガクつきの原因になる。
+// requestAnimationFrame で1フレームにつき最大1回にまとめて実行し、滑らかにする。
+let dmResizePending = false;
+function dmScheduleResize(){
+  if(dmResizePending) return;
+  dmResizePending = true;
+  requestAnimationFrame(()=>{
+    dmResizePending = false;
+    dmResize();
+  });
 }
 
 function dmLoop(ts){
@@ -2274,7 +2397,7 @@ async function initDanmakuCanvas(sky){
   sky.appendChild(dmCanvas);
   dmCtx = dmCanvas.getContext('2d');
   dmResize();
-  window.addEventListener('resize', dmResize);
+  window.addEventListener('resize', dmScheduleResize);
 
   const saved = await storeGet('danmakuSets');
   if(Array.isArray(saved) && saved.length){
