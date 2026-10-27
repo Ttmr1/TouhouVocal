@@ -131,6 +131,7 @@
     <div class="search-box">
       <input type="text" id="searchInput" placeholder='曲名・サークル・原曲で検索' autocomplete="off">
       <button type="button" class="search-clear-btn" id="searchClearBtn" aria-label="検索文字を消去" style="display:none;">×</button>
+      <div class="suggest-box" id="suggestBox"></div>
     </div>
     <div class="search-shortcuts" id="searchShortcuts">
       <button type="button" class="sc-btn" data-sc="曲名()">タイトル</button>
@@ -138,6 +139,7 @@
       <button type="button" class="sc-btn" data-sc="原曲()">原曲</button>
       <button type="button" class="sc-btn" data-sc="&quot;only ">only</button>
       <button type="button" class="sc-btn" data-sc="&quot;不明">不明</button>
+      <button type="button" class="sc-btn" data-sc="&quot;重複">重複</button>
     </div>
     <button type="button" class="yt-search-btn" id="ytSearchBtn" title="検索欄に「No.80」「80」などNo.を入力してから押すと、その曲をYouTubeで検索します">▶ YouTube</button>
     <select id="sortSelect">
@@ -449,6 +451,11 @@ function segmentToPredicate(seg){
       // 先頭の " のみ → タグとして解釈
       if(inner === 'f') return d => favorites.has(d.id);
       if(inner === '不明') return d => !d.circle || !d.orig || d.sec===null || d.sec===undefined;
+      if(inner === '重複'){ // 曲名とサークルが同じ曲（重複の疑い）
+        const counts = {};
+        data.forEach(d => { const k = dupKey(d.title, d.circle); counts[k] = (counts[k] || 0) + 1; });
+        return d => counts[dupKey(d.title, d.circle)] > 1;
+      }
 
       const timeMatch = inner.match(/^time\s+(.*)$/);
       if(timeMatch){
@@ -524,6 +531,11 @@ function buildQueryPlan(qRaw){
   return { predicates, forceRandom };
 }
 
+const dupKey = (title, circle) => normalizeText(title) + '\u0000' + normalizeText(circle || '');
+function findSameTitleCircle(title, circle, excludeId){
+  const k = dupKey(title, circle);
+  return data.find(d => d.id !== excludeId && dupKey(d.title, d.circle) === k);
+}
 function rowText(d){ return normalizeText(d.title+' '+d.circle+' '+d.orig); }
 
 // ---------- render ----------
@@ -703,13 +715,33 @@ tbody.addEventListener('click', async e=>{
   }
   const tr = e.target.closest('tr');
   if(!tr || !tr.dataset.id) return;
+  collectDetailNavIds();
   openTrackDetail(tr.dataset.id);
 });
 
+// 詳細画面の「前後の曲」用：開いた時点の表の表示順（検索・並び替え後）を保持する
+let detailNavIds = [];
+function collectDetailNavIds(){ detailNavIds = [...tbody.querySelectorAll('tr[data-id]')].map(tr => tr.dataset.id); }
+function detailNavHtml(id){
+  const i = detailNavIds.indexOf(id), n = detailNavIds.length;
+  if(i === -1) return '';
+  return `<div class="detail-nav" data-id="${id}">
+        <button type="button" class="btn btn-ghost detail-nav-btn" data-dir="-1"${i === 0 ? ' disabled' : ''}>◀ 前</button>
+        <span>${i + 1} / ${n}</span>
+        <button type="button" class="btn btn-ghost detail-nav-btn" data-dir="1"${i === n - 1 ? ' disabled' : ''}>次 ▶</button>
+      </div>`;
+}
+function detailStep(dir){
+  const nav = modalBody.querySelector('.detail-nav');
+  if(!nav || !modalBackdrop.classList.contains('open')) return;
+  const next = detailNavIds[detailNavIds.indexOf(nav.dataset.id) + dir];
+  if(next) openTrackDetail(next, 'view');
+}
 function openTrackDetail(id, mode){
   mode = mode || 'view';
   const t = data.find(x => x.id === id);
   if(!t) return;
+  if(mode === 'view' && !detailNavIds.includes(id)) collectDetailNavIds();
   let html, title;
   if(mode === 'edit'){ html = buildDetailEditHtml(t); title = '曲を編集'; }
   else if(mode === 'confirmDelete'){ html = buildDetailDeleteConfirmHtml(t); title = '削除の確認'; }
@@ -725,6 +757,7 @@ function buildDetailViewHtml(t){
     : `<div class="field ${extraClass||''}"><div class="flabel">${label}</div><div class="fvalue">${na}</div></div>`;
   return `
     <div class="track-detail">
+      ${detailNavHtml(t.id)}
       <div class="field no"><div class="flabel">No.</div><div class="fvalue">No.${String(t.no).padStart(4,'0')}</div></div>
       ${fillable('曲名', t.title, 'title')}
       ${fillable('サークル', t.circle)}
@@ -807,6 +840,8 @@ async function saveTrackEdit(id){
     showErr(`No. は 1〜${data.length} の範囲で指定してください`); return;
   }
 
+  const similar = findSameTitleCircle(title, circle, id);
+  if(similar && !confirm(`同じ曲名・サークルの曲が他にあります（No.${String(similar.no).padStart(4,'0')}）。このまま保存しますか？`)) return;
   editTrack(id, { title, circle, orig, sec }, newNo);
   await persistTrackState();
   render();
@@ -916,6 +951,8 @@ document.getElementById('regSubmit').addEventListener('click', async ()=>{
     regErrorEl.style.display = 'block';
     return;
   }
+  const similar = findSameTitleCircle(title, circle);
+  if(similar && !confirm(`同じ曲名・サークルの曲が既にあります（No.${String(similar.no).padStart(4,'0')}）。別アレンジなどで問題なければ「OK」で登録します。登録しますか？`)) return;
   const sec = parseSecInput(secRaw);
   let atNo = noRaw ? parseInt(noRaw, 10) : data.length + 1;
   if(!Number.isFinite(atNo) || atNo < 1) atNo = data.length + 1;
@@ -1577,6 +1614,7 @@ function buildHintHtml(){
     ['"time 20-60 ／ "time 0:20-1:00', '尺が <b>20秒から1分</b> までの曲を表示する'],
     ['"time 70- ／ "time 1:10-', '尺が <b>1分10秒以上</b> の曲を表示する'],
     ['"only cc', '曲名・サークル・原曲のいずれかが <b>「cc」だけ</b>（完全一致）の曲を表示する'],
+    ['"重複', '曲名とサークルが同じ曲（重複の疑い）を表示する。曲名順に並べ替えると見比べやすい'],
     ['"不明', 'サークル・原曲・尺など、登録されていない項目がある曲を表示する'],
     ['"or 霊夢 魔理沙', '複数のキーワードのどれかを含む曲を表示する（OR検索）'],
     ['"and 霊夢 魔理沙 ／ "& 霊夢 魔理沙', '複数のキーワードすべてを含む曲を表示する（AND検索）'],
@@ -1826,6 +1864,9 @@ modalBody.addEventListener('click', async e=>{
   const saveBtn = e.target.closest('.detail-save-btn');
   if(saveBtn){ await saveTrackEdit(saveBtn.dataset.id); return; }
 
+  const navBtn = e.target.closest('.detail-nav-btn');
+  if(navBtn){ detailStep(+navBtn.dataset.dir); return; }
+
   const delBtn = e.target.closest('.detail-delete-btn');
   if(delBtn){ openTrackDetail(delBtn.dataset.id, 'confirmDelete'); return; }
 
@@ -1847,6 +1888,106 @@ modalBody.addEventListener('click', async e=>{
   const row = e.target.closest('.list-row');
   if(!row) return;
   fillSearchAndClose(row.dataset.fill);
+});
+
+// スワイプ（左→次の曲 / 右→前の曲）と ←→ キーで詳細の前後移動
+let swipeStart = null;
+modalBody.addEventListener('touchstart', e => { const t = e.touches[0]; swipeStart = { x:t.clientX, y:t.clientY }; }, { passive:true });
+modalBody.addEventListener('touchend', e => {
+  if(!swipeStart) return;
+  const t = e.changedTouches[0], dx = t.clientX - swipeStart.x, dy = t.clientY - swipeStart.y;
+  swipeStart = null;
+  if(Math.abs(dx) >= 60 && Math.abs(dy) < Math.abs(dx) * 0.6) detailStep(dx < 0 ? 1 : -1);
+});
+document.addEventListener('keydown', e => {
+  if(e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  detailStep(e.key === 'ArrowRight' ? 1 : -1);
+});
+
+// ---------- 検索欄の入力補完 ----------
+// 括弧の中でなくても、入力中の単語にサークル名・原曲名の候補を出す。
+// 「サークル( )」の中ではサークル名だけ、「原曲( )」の中では原曲名だけ、「曲名( )」の中では出さない。
+const suggestBox = document.getElementById('suggestBox');
+let suggestPool = null, suggestPoolSrc = null, suggestItems = [], suggestActive = -1, suggestRange = null, suggestMute = false;
+
+function getSuggestPool(){
+  if(suggestPoolSrc !== data){ // data は rebuildData のたびに作り直されるので、変わったら作り直す
+    const seen = new Set();
+    suggestPool = [];
+    for(const [kind, key] of [['サークル', 'circle'], ['原曲', 'orig']]){
+      for(const d of data){
+        if(!d[key]) continue;
+        for(const c of splitComponents(d[key])){
+          const text = c.trim();
+          if(text && !seen.has(kind + text)){ seen.add(kind + text); suggestPool.push({ text, norm: normalizeText(text), kind }); }
+        }
+      }
+    }
+    suggestPoolSrc = data;
+  }
+  return suggestPool;
+}
+function hideSuggest(){ suggestBox.classList.remove('open'); suggestItems = []; suggestActive = -1; }
+function updateSuggest(){
+  if(suggestMute) return;
+  const v = searchInput.value, pos = searchInput.selectionStart ?? v.length;
+  const before = v.slice(0, pos);
+  let start = pos - before.match(/[^\s()]*$/)[0].length;
+  const end = pos + v.slice(pos).match(/^[^\s()]*/)[0].length;
+  if(v[start] === '!') start++; // 否定の ! は候補の対象外
+  const tok = v.slice(start, pos);
+  const field = (before.match(/(曲名|サークル|原曲)\([^)]*$/) || [])[1];
+  if(!tok || QUOTE_CHARS.includes(tok[0]) || /^[\d:\-]+$/.test(tok) || field === '曲名') return hideSuggest();
+
+  const q = normalizeText(tok);
+  suggestItems = getSuggestPool()
+    .filter(p => p.norm !== q && p.norm.includes(q) && (!field || p.kind === field))
+    .sort((a, b) => (b.norm.startsWith(q) - a.norm.startsWith(q)) || a.norm.length - b.norm.length || a.text.localeCompare(b.text, 'ja'))
+    .slice(0, 8);
+  suggestRange = { start, end };
+  suggestActive = -1;
+  if(!suggestItems.length) return hideSuggest();
+  suggestBox.innerHTML = suggestItems.map((it, i) =>
+    `<div class="suggest-item" data-i="${i}"><span class="suggest-kind">${it.kind}</span>${escapeHtml(it.text)}</div>`).join('');
+  suggestBox.classList.add('open');
+}
+function applySuggest(i){
+  const it = suggestItems[i];
+  if(!it || !suggestRange) return;
+  const v = searchInput.value, pos = suggestRange.start + it.text.length;
+  searchInput.value = v.slice(0, suggestRange.start) + it.text + v.slice(suggestRange.end);
+  hideSuggest();
+  suggestMute = true; // 反映の input イベントで候補を出し直さない
+  searchInput.dispatchEvent(new Event('input'));
+  suggestMute = false;
+  searchInput.focus();
+  searchInput.setSelectionRange(pos, pos);
+}
+searchInput.addEventListener('input', updateSuggest);
+searchInput.addEventListener('click', updateSuggest);
+searchInput.addEventListener('blur', () => setTimeout(hideSuggest, 200));
+searchInput.addEventListener('keydown', e => {
+  if(!suggestBox.classList.contains('open')) return;
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    const n = suggestItems.length;
+    suggestActive = e.key === 'ArrowDown' ? (suggestActive + 1) % n : (suggestActive <= 0 ? n - 1 : suggestActive - 1);
+    suggestBox.querySelectorAll('.suggest-item').forEach((el, i) => el.classList.toggle('active', i === suggestActive));
+  } else if(e.key === 'Enter' && suggestActive >= 0){
+    e.preventDefault();
+    applySuggest(suggestActive);
+  } else if(e.key === 'Escape'){
+    hideSuggest();
+  } else if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
+    setTimeout(updateSuggest, 0);
+  }
+});
+suggestBox.addEventListener('mousedown', e => e.preventDefault()); // 入力欄のフォーカスを外さない
+suggestBox.addEventListener('click', e => {
+  const el = e.target.closest('.suggest-item');
+  if(el) applySuggest(+el.dataset.i);
 });
 
 // ---------- ambient background: cosmos + danmaku ----------
