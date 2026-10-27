@@ -1,4 +1,4 @@
-const CACHE_NAME = 'touhou-vocal-v21';
+const CACHE_NAME = 'touhou-vocal-v22';
 
 const APP_SHELL = [
   './index.html',
@@ -44,6 +44,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
+
+  // P2P（PeerJS）のシグナリング通信はキャッシュせず、そのままネットワークへ
+  if (new URL(event.request.url).hostname.endsWith('peerjs.com')) return;
 
   event.respondWith(
 

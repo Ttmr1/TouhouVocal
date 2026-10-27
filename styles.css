@@ -500,6 +500,9 @@
     .stat b{ font-size:19px; }
     .controls{ flex-direction:column; align-items:stretch; }
     .search-box{ flex-basis:auto; }
+    .controls > *{ order:2; }
+    .controls > .search-box{ order:0; }
+    .controls > .search-shortcuts{ order:1; flex:none; }
     #sortSelect{ max-width:none; width:100%; }
     .sort-dir-btn{ width:100%; height:42px; }
     .fav-toggle{ justify-content:center; }
@@ -508,6 +511,9 @@
     .modal-backdrop{ padding:0; align-items:flex-end; }
     .modal-panel{ max-width:none; width:100%; max-height:92vh; border-radius:16px 16px 0 0; }
     .modal-body{ padding:16px 18px 24px; }
+    /* 曲の詳細：画面下端（ホームバー付近）に削除ボタンが来ないよう下に余白を空ける */
+    .track-detail{ padding-bottom:calc(88px + env(safe-area-inset-bottom, 0px)); }
+    .home-btn{ top:12px; left:16px; width:42px; height:42px; }
     .register-grid-top{ grid-template-columns:1fr 1fr; }
     .register-grid-top > div:first-child{ grid-column:1 / -1; }
     .detail-actions .btn, .register-actions .btn{ flex:1 1 auto; text-align:center; }
@@ -526,3 +532,24 @@
     .track-detail .field .fvalue{ font-size:14.5px; }
     .track-detail .field.title .fvalue{ font-size:17px; }
   }
+  /* -------- 検索ショートカット -------- */
+  .search-shortcuts{ flex:1 1 100%; display:flex; flex-wrap:wrap; gap:6px; }
+  .sc-btn{
+    all:unset; cursor:pointer; box-sizing:border-box; padding:7px 14px; font-size:12.5px;
+    color:var(--ink); background:var(--bg-2); border:1px solid var(--line); border-radius:999px;
+    transition:border-color .15s, color .15s;
+  }
+  .sc-btn:hover, .sc-btn:active{ border-color:var(--gold-soft); color:var(--gold); }
+
+  /* -------- ホームボタン（常時表示） -------- */
+  .home-btn{
+    all:unset; position:fixed; top:16px; left:24px; z-index:60; width:46px; height:46px; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    color:var(--ink); background:var(--bg-2); border:1px solid var(--line); border-radius:10px;
+    transition:border-color .2s, color .2s;
+  }
+  .home-btn:hover{ border-color:var(--gold-soft); color:var(--gold); }
+
+  /* -------- データ引き継ぎ -------- */
+  .transfer-note{ color:var(--ink-faint); font-size:12.5px; }
+  .p2p-number{ text-align:center; font-size:30px; letter-spacing:.3em; color:var(--gold); font-family:var(--font-display); min-height:1.4em; margin-top:6px; }

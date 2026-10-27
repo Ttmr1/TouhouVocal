@@ -16,11 +16,14 @@
 <meta name="apple-mobile-web-app-title" content="東方Vocal">
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 </head>
 <body>
 
 <div class="sky" id="sky"></div>
+
+<button type="button" class="home-btn" id="homeBtn" aria-label="ホーム（検索を解除して先頭へ）"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 3l9 8h-3v9h-5v-6h-2v6H6v-9H3z"/></svg></button>
 
 <nav class="topbar">
   <div class="menu-wrap">
@@ -64,7 +67,7 @@
       </div>
 
       <button data-modal="replaceText">文字の置換</button>
-      <button data-modal="dataTransfer">データ引き継ぎ（QR／コード）</button>
+      <button data-modal="dataTransfer">データ引き継ぎ（QR／コード／5桁）</button>
       <button data-modal="bgSettings">背景変更</button>
     </div>
   </div>
@@ -128,6 +131,13 @@
     <div class="search-box">
       <input type="text" id="searchInput" placeholder='曲名・サークル・原曲で検索' autocomplete="off">
       <button type="button" class="search-clear-btn" id="searchClearBtn" aria-label="検索文字を消去" style="display:none;">×</button>
+    </div>
+    <div class="search-shortcuts" id="searchShortcuts">
+      <button type="button" class="sc-btn" data-sc="曲名()">タイトル</button>
+      <button type="button" class="sc-btn" data-sc="サークル()">サークル</button>
+      <button type="button" class="sc-btn" data-sc="原曲()">原曲</button>
+      <button type="button" class="sc-btn" data-sc="&quot;only ">only</button>
+      <button type="button" class="sc-btn" data-sc="&quot;不明">不明</button>
     </div>
     <button type="button" class="yt-search-btn" id="ytSearchBtn" title="検索欄に「No.80」「80」などNo.を入力してから押すと、その曲をYouTubeで検索します">▶ YouTube</button>
     <select id="sortSelect">
@@ -602,6 +612,16 @@ searchClearBtn.addEventListener('click', ()=>{
   searchInput.focus();
   render();
 });
+document.getElementById('searchShortcuts').addEventListener('click', e=>{
+  const btn = e.target.closest('[data-sc]');
+  if(!btn) return;
+  const v = btn.dataset.sc;
+  searchInput.value = v;
+  searchInput.dispatchEvent(new Event('input')); // 絞り込み・YouTubeボタン状態を通常入力と同じ経路で更新
+  searchInput.focus();
+  const pos = v.endsWith(')') ? v.length - 1 : v.length; // 括弧の中にカーソルを置く
+  searchInput.setSelectionRange(pos, pos);
+});
 const favToggle = document.getElementById('favToggle');
 function toggleFavFilter(){
   filters.favOnly = !filters.favOnly;
@@ -609,6 +629,16 @@ function toggleFavFilter(){
   render();
 }
 favToggle.addEventListener('click', toggleFavFilter);
+// ホームボタン：モーダル・メニューを閉じ、検索とお気に入り絞り込みを解除して先頭へ戻る
+document.getElementById('homeBtn').addEventListener('click', ()=>{
+  closeModal();
+  document.getElementById('menuDropdown').classList.remove('open');
+  filters.q = ''; searchInput.value = '';
+  filters.favOnly = false; favToggle.classList.remove('active');
+  updateYtSearchBtnState();
+  render();
+  window.scrollTo({ top:0, behavior:'smooth' });
+});
 favToggle.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleFavFilter(); } });
 
 resultLine.addEventListener('click', e=>{
@@ -931,7 +961,7 @@ function openModal(title, bodyHtml){
   modalBody.innerHTML = bodyHtml;
   modalBackdrop.classList.add('open');
 }
-function closeModal(){ modalBackdrop.classList.remove('open'); stopTransferScan(); }
+function closeModal(){ modalBackdrop.classList.remove('open'); stopTransferScan(); p2pStop(); }
 document.getElementById('modalClose').addEventListener('click', closeModal);
 modalBackdrop.addEventListener('click', e=>{ if(e.target === modalBackdrop) closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeModal(); });
@@ -1349,84 +1379,75 @@ function buildBackgroundSettingsHtml(){
     <p style="color:var(--ink-faint); font-size:11.5px; margin-top:12px;">チェックした弾幕が順番に背景に登場します。少なくとも1つは選択してください。</p>`;
 }
 
-// ----- データ引き継ぎ（QR／コード） -----
-// gzip圧縮→Base64化したコード文字列で、登録・編集・削除・お気に入りを丸ごと引き継ぐ。
-// 曲数が多いとQRコードの容量に収まらないことがあるため、その場合はコードのコピーのみ案内する。
-function arrayBufferToBase64(buf){
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-function base64ToUint8Array(b64){
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
+// ----- データ引き継ぎ（QR／コード／5桁番号P2P） -----
+// 元の data.js（RAW_DATA）との差分だけを配列形式で書き出し、deflate-raw→Base64 で短いコードにする。
+// 同じコードを PeerJS 経由で「5桁の番号」だけで端末間送信することもできる。
+// 形式 v4: e=変更した元曲[[No,曲名,サークル,原曲,尺]] / n=新規登録曲[[曲名,サークル,原曲,尺]] / d=削除した元曲のNo
+//          f=お気に入り / o=並び順（並べ替え時のみ）。元曲は No.、新規曲は -(n内の位置+1) で参照する。
+const P2P_PREFIX = 'tvocal-';
+const toB64 = bytes => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result.split(',')[1]); f.readAsDataURL(new Blob([bytes])); });
+const viaStream = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+const setText = (id, t) => { const el = document.getElementById(id); if(el) el.textContent = t; };
+const transferMsg = t => setText('transferMsg', t);
+
 async function compressToCode(text){
-  const bytes = new TextEncoder().encode(text);
+  let bytes = new TextEncoder().encode(text), tag = 'R';
   if(typeof CompressionStream === 'function'){
-    try{
-      const cs = new CompressionStream('gzip');
-      const writer = cs.writable.getWriter();
-      writer.write(bytes); writer.close();
-      const compressed = await new Response(cs.readable).arrayBuffer();
-      return 'TVGZ1:' + arrayBufferToBase64(compressed);
-    }catch(e){ /* フォールバックへ */ }
+    try{ bytes = await viaStream(bytes, new CompressionStream('deflate-raw')); tag = 'Z'; }catch(e){ /* 無圧縮で続行 */ }
   }
-  return 'TVRAW1:' + arrayBufferToBase64(bytes.buffer);
+  return tag + await toB64(bytes);
 }
 async function decompressFromCode(code){
-  const idx = code.indexOf(':');
-  if(idx === -1) throw new Error('コードの形式が正しくありません');
-  const tag = code.slice(0, idx);
-  const bytes = base64ToUint8Array(code.slice(idx+1));
-  if(tag === 'TVGZ1'){
-    if(typeof DecompressionStream !== 'function') throw new Error('このブラウザは展開に対応していません');
-    const ds = new DecompressionStream('gzip');
-    const writer = ds.writable.getWriter();
-    writer.write(bytes); writer.close();
-    const out = await new Response(ds.readable).arrayBuffer();
-    return new TextDecoder().decode(out);
-  } else if(tag === 'TVRAW1'){
-    return new TextDecoder().decode(bytes);
-  }
-  throw new Error('未対応のコード形式です');
+  let bytes = Uint8Array.from(atob(code.slice(1)), c => c.charCodeAt(0));
+  if(code[0] === 'Z') bytes = await viaStream(bytes, new DecompressionStream('deflate-raw'));
+  else if(code[0] !== 'R') throw new Error('format');
+  return new TextDecoder().decode(bytes);
 }
-function buildBaseTracksById(){
-  const baseById = {};
-  RAW_DATA.forEach(d=>{ baseById['b'+d.no] = { title:d.title, circle:d.circle||'', orig:d.orig||'', sec:(d.sec ?? null) }; });
-  return baseById;
-}
-function buildDefaultOrder(baseById, deletedSet, customIdsInOrder){
-  const reconstructed = [];
-  RAW_DATA.forEach(d=>{ const id = 'b'+d.no; if(!deletedSet.has(id)) reconstructed.push(id); });
-  reconstructed.push(...customIdsInOrder);
-  return reconstructed;
-}
-function buildTransferPayloadJson(){
-  // 元の data.js（RAW_DATA）を基準に、変更・追加・削除された曲だけを記録する（v3形式）。
-  // さらに、並び替えをしていない場合（base側はNo.昇順のまま・新規/変更曲は末尾に追加されている状態）は
-  // order配列自体を省略できるため、通常の利用ではコードがかなり小さくなる。
-  const baseById = buildBaseTracksById();
-  const changed = {};
-  for(const id of order){
-    const t = tracksById[id];
-    const base = baseById[id];
-    if(!base || base.title !== t.title || base.circle !== t.circle || base.orig !== t.orig || base.sec !== t.sec){
-      changed[id] = t;
-    }
-  }
-  const deleted = Object.keys(baseById).filter(id => !(id in tracksById));
-  const deletedSet = new Set(deleted);
-  const customIdsInOrder = order.filter(id => !(id in baseById));
-  const defaultOrder = buildDefaultOrder(baseById, deletedSet, customIdsInOrder);
-  const orderMatchesDefault = defaultOrder.length === order.length && defaultOrder.every((id,i)=>id===order[i]);
 
-  const payload = { v:3, changed, deleted, favorites:[...favorites] };
-  if(!orderMatchesDefault) payload.order = order; // 並び替えがある時だけ明示的に含める
-  return JSON.stringify(payload);
+const trackRow = t => [t.title, t.circle || '', t.orig || '', t.sec ?? null];
+const rawNos = () => RAW_DATA.map(d => d.no);
+
+function buildTransferPayloadJson(){
+  const custom = order.filter(id => id[0] !== 'b'); // 新規登録曲（並び順）
+  const ref = id => id[0] === 'b' ? +id.slice(1) : -(custom.indexOf(id) + 1);
+  const e = [], d = [];
+  for(const raw of RAW_DATA){
+    const t = tracksById['b' + raw.no];
+    if(!t) d.push(raw.no);
+    else if(JSON.stringify(trackRow(t)) !== JSON.stringify(trackRow(raw))) e.push([raw.no, ...trackRow(t)]);
+  }
+  const p = { v:4, e, n: custom.map(id => trackRow(tracksById[id])), d, f: [...favorites].filter(id => id in tracksById).map(ref) };
+  const o = order.map(ref);
+  const defaultOrder = rawNos().filter(no => !d.includes(no)).concat(custom.map((_, i) => -(i + 1)));
+  if(JSON.stringify(o) !== JSON.stringify(defaultOrder)) p.o = o; // 並び替えがある時だけ含める
+  return JSON.stringify(p);
+}
+
+async function applyTransferCode(code){
+  let p;
+  try{ p = JSON.parse(await decompressFromCode((code || '').trim())); }
+  catch(e){ return transferMsg('コードを読み取れませんでした。正しいコードか確認してください。'); }
+  if(!p || p.v !== 4 || !Array.isArray(p.e) || !Array.isArray(p.n) || !Array.isArray(p.d)) return transferMsg('コードの内容が正しくありません。');
+
+  const toTrack = ([title, circle, orig, sec]) => ({ title, circle, orig, sec });
+  const byId = {};
+  RAW_DATA.forEach(raw => { byId['b' + raw.no] = toTrack(trackRow(raw)); });
+  p.d.forEach(no => { delete byId['b' + no]; });
+  p.e.forEach(([no, ...row]) => { byId['b' + no] = toTrack(row); });
+  const customIds = p.n.map(row => { const id = makeId(); byId[id] = toTrack(row); return id; });
+  const idOf = r => r > 0 ? 'b' + r : customIds[-r - 1];
+  const refs = p.o || rawNos().filter(no => !p.d.includes(no)).concat(customIds.map((_, i) => -(i + 1)));
+  const newOrder = refs.map(idOf).filter(id => id in byId);
+
+  if(!confirm(`このコードには${newOrder.length}曲のデータが含まれています。現在の登録・編集・削除・お気に入りの内容はすべて置き換わります。よろしいですか？`)) return;
+  order = newOrder;
+  tracksById = byId;
+  favorites = new Set((p.f || []).map(idOf).filter(id => id in byId));
+  rebuildData();
+  await persistTrackState();
+  await persistFavorites();
+  render();
+  closeModal();
 }
 
 function buildDataTransferHtml(){
@@ -1436,167 +1457,112 @@ function buildDataTransferHtml(){
       <button type="button" class="bar-tab" data-transfertab="import">インポート</button>
     </div>
     <div class="transfer-panel" data-transferpanel="export">
-      <p style="color:var(--ink-faint); font-size:12px; margin:0 0 12px;">
-        現在の登録・編集・削除・お気に入りの状態を、QRコードまたはコードとして書き出します。曲数が多い場合はQRコードの容量を超えることがあり、その場合はコードのみ表示されます。
-      </p>
-      <div id="transferQrArea" style="display:flex; justify-content:center; margin-bottom:12px;"><span style="color:var(--ink-faint); font-size:12.5px;">生成中…</span></div>
-      <textarea id="transferExportCode" readonly rows="5" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="生成中…"></textarea>
+      <p class="transfer-note" style="margin:0 0 12px;">現在の登録・編集・削除・お気に入りの状態を、QRコード／コード／5桁の番号のいずれかで別の端末へ引き継げます。</p>
+      <div id="transferQrArea" style="display:flex; justify-content:center; margin-bottom:12px;"><span class="transfer-note">生成中…</span></div>
+      <textarea id="transferExportCode" readonly rows="3" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="生成中…"></textarea>
       <button type="button" class="btn btn-primary" id="transferCopyBtn" style="margin-top:10px; width:100%;">コードをコピー</button>
+      <button type="button" class="btn btn-ghost" id="p2pSendBtn" style="margin-top:8px; width:100%;">📡 5桁の番号で送る</button>
+      <div class="p2p-number" id="p2pNumber"></div>
     </div>
     <div class="transfer-panel" data-transferpanel="import" style="display:none;">
-      <p style="color:var(--ink-faint); font-size:12px; margin:0 0 12px;">
-        別の端末で書き出したコードを貼り付けるか、QRコードをカメラで読み取ってください。適用すると現在のデータは上書きされます。
-      </p>
-      <textarea id="transferImportCode" rows="5" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="ここにコードを貼り付け"></textarea>
+      <p class="transfer-note" style="margin:0 0 12px;">コードを貼り付けるか、QRコードの読み取り、または送信側に表示された5桁の番号で受け取れます。適用すると現在のデータは上書きされます。</p>
+      <textarea id="transferImportCode" rows="3" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="ここにコードを貼り付け"></textarea>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button type="button" class="btn btn-primary" id="transferImportBtn" style="flex:1;">このコードを適用する</button>
         <button type="button" class="btn btn-ghost" id="transferScanBtn" style="flex:1;">📷 QRを読み取る</button>
       </div>
       <video id="transferScanVideo" playsinline style="display:none; width:100%; margin-top:10px; border-radius:8px;"></video>
-      <div id="transferImportMsg" style="margin-top:10px; font-size:12.5px;"></div>
-    </div>`;
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <input type="text" id="p2pInput" inputmode="numeric" maxlength="5" placeholder="5桁の番号" style="flex:1; min-width:0; font-size:16px; text-align:center; letter-spacing:.2em;">
+        <button type="button" class="btn btn-primary" id="p2pReceiveBtn" style="flex:1;">📡 番号で受け取る</button>
+      </div>
+    </div>
+    <div id="transferMsg" class="transfer-note" style="margin-top:10px;"></div>`;
 }
 
 async function populateDataTransferExport(){
+  const code = await compressToCode(buildTransferPayloadJson());
   const codeEl = document.getElementById('transferExportCode');
-  const qrEl = document.getElementById('transferQrArea');
-  if(!codeEl) return; // モーダルが既に閉じられた場合
-  const json = buildTransferPayloadJson();
-  const code = await compressToCode(json);
-  if(!document.getElementById('transferExportCode')) return; // 生成中に閉じられた場合
+  if(!codeEl) return; // 生成中に閉じられた場合
   codeEl.value = code;
-
-  if(typeof qrcode !== 'function'){
-    qrEl.innerHTML = '<span style="color:var(--ink-faint); font-size:12.5px;">QRライブラリを読み込めませんでした（コードは利用できます）</span>';
-    return;
-  }
+  const qrEl = document.getElementById('transferQrArea');
   try{
     const qr = qrcode(0, 'L');
     qr.addData(code);
     qr.make();
     qrEl.innerHTML = qr.createSvgTag({ cellSize:4, margin:4 });
   }catch(e){
-    qrEl.innerHTML = '<span style="color:var(--ink-faint); font-size:12.5px;">曲数が多いためQRコードには収まりませんでした。下のコードをコピーしてご利用ください。</span>';
+    qrEl.innerHTML = '<span class="transfer-note">QRコードにできませんでした。コードをコピーするか、5桁の番号で送ってください。</span>';
   }
 }
 
 let transferScanStream = null;
 function stopTransferScan(){
-  if(transferScanStream){
-    transferScanStream.getTracks().forEach(t=>t.stop());
-    transferScanStream = null;
-  }
+  if(transferScanStream) transferScanStream.getTracks().forEach(t => t.stop());
+  transferScanStream = null;
   const video = document.getElementById('transferScanVideo');
   if(video) video.style.display = 'none';
 }
-
 async function startTransferScan(){
   const video = document.getElementById('transferScanVideo');
-  const msgEl = document.getElementById('transferImportMsg');
   if(!video) return;
-  if(typeof jsQR !== 'function'){
-    if(msgEl) msgEl.textContent = 'QR読み取りライブラリを読み込めませんでした。コードを貼り付けてください。';
-    return;
-  }
-  try{
-    transferScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-  }catch(e){
-    if(msgEl) msgEl.textContent = 'カメラを利用できませんでした。コードを貼り付けてください。';
-    return;
-  }
+  if(typeof jsQR !== 'function') return transferMsg('QR読み取りライブラリを読み込めませんでした。コードを貼り付けてください。');
+  try{ transferScanStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } }); }
+  catch(e){ return transferMsg('カメラを利用できませんでした。コードを貼り付けてください。'); }
   video.srcObject = transferScanStream;
   video.style.display = 'block';
   await video.play();
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  function tick(){
+  const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+  (function tick(){
     if(!transferScanStream) return; // 途中で停止された
     if(video.readyState === video.HAVE_ENOUGH_DATA){
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const result = jsQR(imgData.data, imgData.width, imgData.height);
+      ctx.drawImage(video, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const result = jsQR(img.data, img.width, img.height);
       if(result && result.data){
         stopTransferScan();
-        const importEl = document.getElementById('transferImportCode');
-        if(importEl) importEl.value = result.data;
-        if(msgEl) msgEl.textContent = 'QRコードを読み取りました。「このコードを適用する」を押してください。';
-        return;
+        document.getElementById('transferImportCode').value = result.data;
+        return transferMsg('QRコードを読み取りました。「このコードを適用する」を押してください。');
       }
     }
     requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
+  })();
 }
 
-async function applyTransferCode(code){
-  const msgEl = document.getElementById('transferImportMsg');
-  if(!code || !code.trim()){
-    if(msgEl) msgEl.textContent = 'コードが入力されていません。';
-    return;
-  }
-  let payload;
-  try{
-    const json = await decompressFromCode(code.trim());
-    payload = JSON.parse(json);
-  }catch(e){
-    if(msgEl) msgEl.textContent = 'コードを読み取れませんでした。正しいコードか確認してください。';
-    return;
-  }
-  if(!payload){
-    if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
-    return;
-  }
+// ----- 5桁の番号でP2P送受信（PeerJS公開サーバー経由で接続し、データは端末間で直接送る） -----
+let p2p = null;
+function p2pStop(){ if(p2p){ try{ p2p.destroy(); }catch(e){} p2p = null; } }
 
-  let newOrder, newTracksById;
-  if(payload.v === 3){
-    if(!payload.changed || !Array.isArray(payload.deleted)){
-      if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
-      return;
-    }
-    const baseById = buildBaseTracksById();
-    const deletedSet = new Set(payload.deleted);
-    payload.deleted.forEach(id => { delete baseById[id]; });
-    newTracksById = Object.assign(baseById, payload.changed);
-    if(Array.isArray(payload.order)){
-      newOrder = payload.order;
-    } else {
-      // order省略時：base側はNo.昇順のまま、新規追加された曲（changedのうちbaseに無いid）を末尾に追加する
-      const customIdsInOrder = Object.keys(payload.changed).filter(id => !(id in buildBaseTracksById()));
-      newOrder = buildDefaultOrder(buildBaseTracksById(), deletedSet, customIdsInOrder);
-    }
-  } else if(payload.v === 2){
-    // 差分形式（order省略なし）：元のRAW_DATAを基準に、削除分を除いてから変更・追加分を上書きする
-    if(!payload.changed || !Array.isArray(payload.deleted) || !Array.isArray(payload.order)){
-      if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
-      return;
-    }
-    const baseById = buildBaseTracksById();
-    payload.deleted.forEach(id => { delete baseById[id]; });
-    newTracksById = Object.assign(baseById, payload.changed);
-    newOrder = payload.order;
-  } else {
-    // v1形式：フルデータ（後方互換）
-    if(!payload.tracksById || !Array.isArray(payload.order)){
-      if(msgEl) msgEl.textContent = 'コードの内容が正しくありません。';
-      return;
-    }
-    newTracksById = payload.tracksById;
-    newOrder = payload.order;
-  }
+function p2pSend(){
+  p2pStop();
+  if(typeof Peer !== 'function') return transferMsg('通信ライブラリを読み込めませんでした。コードをご利用ください。');
+  const num = String(Math.floor(Math.random() * 1e5)).padStart(5, '0');
+  const peer = p2p = new Peer(P2P_PREFIX + num);
+  peer.on('open', () => { setText('p2pNumber', num); transferMsg('受信側で、この番号を入力してください（この画面を開いたままにしてください）。'); });
+  peer.on('error', e => e.type === 'unavailable-id' ? p2pSend() : transferMsg('通信エラー: ' + e.type)); // 番号が重複したら振り直す
+  peer.on('connection', conn => conn.on('open', async () => {
+    conn.send(await compressToCode(buildTransferPayloadJson()));
+    setText('p2pNumber', '');
+    transferMsg('送信しました。');
+    conn.on('close', p2pStop);
+  }));
+}
 
-  if(!confirm(`このコードには${newOrder.length}曲のデータが含まれています。現在の登録・編集・削除・お気に入りの内容はすべて置き換わります。よろしいですか？`)) return;
-
-  order = newOrder;
-  tracksById = newTracksById;
-  favorites = new Set(Array.isArray(payload.favorites) ? payload.favorites : []);
-  rebuildData();
-  await persistTrackState();
-  await persistFavorites();
-  render();
-  stopTransferScan();
-  closeModal();
+function p2pReceive(){
+  p2pStop();
+  const num = (document.getElementById('p2pInput')?.value || '').trim();
+  if(!/^\d{5}$/.test(num)) return transferMsg('5桁の数字を入力してください。');
+  if(typeof Peer !== 'function') return transferMsg('通信ライブラリを読み込めませんでした。コードをご利用ください。');
+  transferMsg('接続中…');
+  let got = false;
+  const peer = p2p = new Peer();
+  peer.on('error', e => transferMsg(e.type === 'peer-unavailable' ? 'その番号の端末が見つかりません。送信側の画面が開いているか確認してください。' : '通信エラー: ' + e.type));
+  peer.on('open', () => {
+    const conn = peer.connect(P2P_PREFIX + num);
+    conn.on('data', async code => { got = true; p2pStop(); await applyTransferCode(code); });
+  });
+  setTimeout(() => { if(p2p === peer && !got) transferMsg('接続できませんでした。もう一度お試しください。'); }, 20000);
 }
 
 // ----- 検索ヒント -----
@@ -1818,10 +1784,9 @@ modalBody.addEventListener('click', async e=>{
     return;
   }
 
-  if(e.target.closest('#transferScanBtn')){
-    startTransferScan();
-    return;
-  }
+  if(e.target.closest('#transferScanBtn')){ startTransferScan(); return; }
+  if(e.target.closest('#p2pSendBtn')){ p2pSend(); return; }
+  if(e.target.closest('#p2pReceiveBtn')){ p2pReceive(); return; }
 
   const barTab = e.target.closest('.bar-tab');
   if(barTab){
