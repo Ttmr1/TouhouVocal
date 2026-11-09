@@ -1461,10 +1461,25 @@ function buildTransferPayloadJson(){
   return JSON.stringify(p);
 }
 
+// 共通の基準からの差分コード（v6）：基準に重ねて送信側のデータを復元し、確認画面で項目ごとに選んで適用する
+async function applyTransferDiff(p){
+  if(![p.add, p.chg, p.del].every(Array.isArray)) return transferMsg('コードの内容が正しくありません。');
+  let baseTracks = [];
+  if(p.b !== null){
+    const base = await loadSyncBase();
+    if(!base || base.hash !== p.b) return transferMsg('この端末の基準がコードと一致しません。送信側で「全体を送る」にチェックを入れたコードで引き継いでください。');
+    baseTracks = base.tracks;
+  }
+  const S = syncPatch(baseTracks, p);
+  if(syncStateHash(S) !== p.s) return transferMsg('コードの内容を復元できませんでした。全体を送るコードで引き継ぎ直してください。');
+  showSyncPreview(syncBuildReply(S, syncManifest(syncLocalTracks())), S);
+}
+
 async function applyTransferCode(code){
   let p;
   try{ p = JSON.parse(await decompressFromCode((code || '').trim())); }
   catch(e){ return transferMsg('コードを読み取れませんでした。正しいコードか確認してください。'); }
+  if(p && p.v === 6) return applyTransferDiff(p);
   if(!p || p.v !== 4 || !Array.isArray(p.e) || !Array.isArray(p.n) || !Array.isArray(p.d)) return transferMsg('コードの内容が正しくありません。');
 
   const toTrack = ([title, circle, orig, sec]) => ({ title, circle, orig, sec });
@@ -1495,15 +1510,18 @@ function buildDataTransferHtml(){
       <button type="button" class="bar-tab" data-transfertab="import">インポート</button>
     </div>
     <div class="transfer-panel" data-transferpanel="export">
-      <p class="transfer-note" style="margin:0 0 12px;">現在の登録・編集・削除・お気に入りの状態を、QRコード／コード／5桁の番号のいずれかで別の端末へ引き継げます。5桁の番号では、受信側との違いだけを送ります。</p>
+      <p class="transfer-note" style="margin:0 0 12px;">現在の登録・編集・削除・お気に入りの状態を、QRコード／コード／5桁の番号のいずれかで別の端末へ引き継げます。QR／コードは前回の引き継ぎからの差分だけを送ります（相手が適用したら「引き継ぎ完了」を押すと基準が更新されます）。5桁の番号では、受信側との違いだけを送ります。</p>
       <div id="transferQrArea" style="display:flex; justify-content:center; margin-bottom:12px;"><span class="transfer-note">生成中…</span></div>
+      <div id="transferDiffInfo" class="transfer-note" style="margin-bottom:6px;"></div>
+      <label class="transfer-note" style="display:flex; gap:6px; align-items:center; margin-bottom:8px;"><input type="checkbox" id="transferFullChk"> 全体を送る（前回の基準を使わない）</label>
       <textarea id="transferExportCode" readonly rows="3" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="生成中…"></textarea>
       <button type="button" class="btn btn-primary" id="transferCopyBtn" style="margin-top:10px; width:100%;">コードをコピー</button>
+      <button type="button" class="btn btn-ghost" id="transferDoneBtn" style="margin-top:8px; width:100%;">✔ 相手が適用した（引き継ぎ完了・基準を更新）</button>
       <button type="button" class="btn btn-ghost" id="p2pSendBtn" style="margin-top:8px; width:100%;">📡 5桁の番号で送る</button>
       <div class="p2p-number" id="p2pNumber"></div>
     </div>
     <div class="transfer-panel" data-transferpanel="import" style="display:none;">
-      <p class="transfer-note" style="margin:0 0 12px;">コードを貼り付けるかQRコードを読み取ると、現在のデータは上書きされます。送信側に表示された5桁の番号で受け取った場合は、違いだけを確認して、項目ごとに選んで反映できます。</p>
+      <p class="transfer-note" style="margin:0 0 12px;">コードの貼り付け・QRの読み取り・5桁の番号のどれで受け取っても、違いだけを確認して、項目ごとに選んで反映できます。</p>
       <textarea id="transferImportCode" rows="3" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="ここにコードを貼り付け"></textarea>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button type="button" class="btn btn-primary" id="transferImportBtn" style="flex:1;">このコードを適用する</button>
@@ -1518,8 +1536,15 @@ function buildDataTransferHtml(){
     <div id="transferMsg" class="transfer-note" style="margin-top:10px;"></div>`;
 }
 
+let transferPendingBase = null; // 「引き継ぎ完了」で共通の基準にする、コード作成時点のデータ
 async function populateDataTransferExport(){
-  const code = await compressToCode(buildTransferPayloadJson());
+  const full = !!document.getElementById('transferFullChk')?.checked;
+  const cur = syncLocalTracks();
+  const base = full ? null : await loadSyncBase();
+  const diff = syncBuildReply(cur, syncManifest(base ? base.tracks : []));
+  transferPendingBase = cur;
+  setText('transferDiffInfo', base ? `前回の引き継ぎからの差分：追加 ${diff.add.length}件・変更 ${diff.chg.length}件・削除 ${diff.del.length}件` : (full ? '全体を送るコードです（基準を使いません）。' : '共通の基準がまだ無いため、全体を送るコードです。'));
+  const code = await compressToCode(JSON.stringify({ v: 6, b: base ? base.hash : null, s: syncStateHash(cur), add: diff.add, chg: diff.chg, del: diff.del }));
   const codeEl = document.getElementById('transferExportCode');
   if(!codeEl) return; // 生成中に閉じられた場合
   codeEl.value = code;
@@ -1635,6 +1660,20 @@ function syncResolve(localTracks, reply){
   const dels = reply.del.map(kh => byKh.get(kh)).filter(Boolean).map(x => ({ id: x.t.id, t: x.t }));
   return { adds, chgs, dels, total: adds.length + chgs.length + dels.length };
 }
+
+// 曲の集合を表すハッシュ（並び順に依存しない）。引き継ぎの「共通の基準」の目印に使う
+const syncStateHash = tracks => syncHash(syncIndex(tracks).map(x => x.ch).sort().join(','));
+// 基準（または自分のデータ）に差分を重ねて、送信側の全曲データを復元する
+function syncPatch(baseTracks, reply){
+  const del = new Set(reply.del), chg = new Map(reply.chg.map(([kh, ...r]) => [kh, r]));
+  const out = [];
+  for(const x of syncIndex(baseTracks)){
+    if(del.has(x.kh)) continue;
+    out.push(chg.has(x.kh) ? syncRowToTrack(chg.get(x.kh)) : x.t);
+  }
+  for(const r of reply.add) out.push(syncRowToTrack(r));
+  return out;
+}
 // === SYNC-CORE-END ===
 
 const syncLocalTracks = () => data.map(d => ({ id: d.id, title: d.title, circle: d.circle, orig: d.orig, sec: d.sec, fav: favorites.has(d.id) }));
@@ -1693,10 +1732,19 @@ function syncUpdateCount(){
   const btn = document.getElementById('syncApplyBtn');
   if(btn) btn.textContent = `選択した内容を適用（${syncSelection().count}件）`;
 }
-function showSyncPreview(reply){
+// 共通の基準：引き継ぎが成功した時点の全曲データを保存しておき、次回はここからの差分だけを送る
+async function saveSyncBase(tracks){ await storeSet('syncBase', { hash: syncStateHash(tracks), rows: tracks.map(syncRow) }); }
+async function loadSyncBase(){
+  const b = await storeGet('syncBase');
+  return b && Array.isArray(b.rows) ? { hash: b.hash, tracks: b.rows.map(syncRowToTrack) } : null;
+}
+// reply: この端末のデータに対する差分 / S: 引き継ぎ後に共通の基準になる送信側の全曲データ
+function showSyncPreview(reply, S){
   const ok = reply && reply.v === 5 && ['add','chg','del'].every(k => Array.isArray(reply[k]));
   if(!ok) return transferMsg('受信した内容が正しくありません。');
   syncDiff = syncResolve(syncLocalTracks(), reply);
+  syncDiff.S = S || null;
+  if(!syncDiff.total && S) saveSyncBase(S); // 違いが無くても基準は揃える
   openModal('データ引き継ぎ：変更内容の確認', buildSyncPreviewHtml(syncDiff));
   syncUpdateCount();
 }
@@ -1726,6 +1774,7 @@ async function syncApplyNow(){
   await persistFavorites();
   render();
   const summary = `追加 ${sel.adds.length}件・変更 ${sel.chgs.size}件・削除 ${sel.dels.length}件`;
+  if(syncDiff.S) await saveSyncBase(syncDiff.S);
   syncDiff = null;
   closeModal();
   openModal('反映しました', `<p style="font-size:13px; margin:0;">${summary}を反映しました。</p>`);
@@ -1746,8 +1795,11 @@ function p2pSend(){
     transferMsg('受信側と接続しました。差分を確認しています…');
     conn.on('data', msg => {
       if(!msg || msg.v !== 5 || !Array.isArray(msg.items)) return;
-      const reply = syncBuildReply(syncLocalTracks(), msg.items);
+      const mine = syncLocalTracks();
+      const reply = syncBuildReply(mine, msg.items);
+      reply.s = syncStateHash(mine);
       conn.send(reply);
+      saveSyncBase(mine); // 送った時点のデータを共通の基準にする
       setText('p2pNumber', '');
       transferMsg(`差分を送信しました（追加 ${reply.add.length}件・変更 ${reply.chg.length}件・相手にだけある曲 ${reply.del.length}件）。適用は受信側で選びます。`);
     });
@@ -1768,7 +1820,14 @@ function p2pReceive(){
   peer.on('open', () => {
     const conn = peer.connect(P2P_PREFIX + num, { reliable: true });
     conn.on('open', () => { transferMsg('差分を確認しています…'); conn.send({ v: 5, items: syncManifest(syncLocalTracks()) }); });
-    conn.on('data', reply => { got = true; p2pStop(); showSyncPreview(reply); });
+    conn.on('data', reply => {
+      got = true; p2pStop();
+      const ok = reply && reply.v === 5 && ['add','chg','del'].every(k => Array.isArray(reply[k]));
+      if(!ok) return transferMsg('受信した内容が正しくありません。');
+      const S = syncPatch(syncLocalTracks(), reply);
+      if(reply.s && syncStateHash(S) !== reply.s) return transferMsg('受信内容を復元できませんでした。もう一度お試しください。');
+      showSyncPreview(reply, S);
+    });
   });
   setTimeout(() => { if(p2p === peer && !got) transferMsg('接続できませんでした。もう一度お試しください。'); }, 20000);
 }
@@ -1993,6 +2052,10 @@ modalBody.addEventListener('click', async e=>{
     return;
   }
 
+  if(e.target.closest('#transferDoneBtn')){
+    if(transferPendingBase){ await saveSyncBase(transferPendingBase); transferMsg('基準を更新しました。次回はここからの差分だけを送ります。'); }
+    return;
+  }
   if(e.target.closest('#transferScanBtn')){ startTransferScan(); return; }
   if(e.target.closest('#p2pSendBtn')){ p2pSend(); return; }
   if(e.target.closest('#p2pReceiveBtn')){ p2pReceive(); return; }
@@ -2068,7 +2131,10 @@ modalBody.addEventListener('click', async e => {
   if(e.target.closest('#syncCancelBtn')){ syncDiff = null; closeModal(); return; }
   if(e.target.closest('#syncApplyBtn')){ await syncApplyNow(); return; }
 });
-modalBody.addEventListener('change', e => { if(e.target.matches('[data-sync]')) syncUpdateCount(); });
+modalBody.addEventListener('change', e => {
+  if(e.target.matches('[data-sync]')) syncUpdateCount();
+  if(e.target.id === 'transferFullChk') populateDataTransferExport();
+});
 
 // スワイプ（左→次の曲 / 右→前の曲）と ←→ キーで詳細の前後移動
 let swipeStart = null;
