@@ -1048,7 +1048,8 @@ let cachedDataJsHandle = null;
 
 function buildDataJsContent(){
   const exportArr = data.map(d => ({
-    no: d.no, title: d.title, circle: d.circle || null, orig: d.orig || null, sec: d.sec
+    no: d.no, title: d.title, circle: d.circle || null, orig: d.orig || null, sec: d.sec,
+    ...(favorites.has(d.id) ? { fav: 1 } : {}) // お気に入りの曲だけ fav:1 を付けて書き出す
   }));
   return 'const RAW_DATA = ' + JSON.stringify(exportArr) + ';\n' +
          'const ORIG_META_RAW = ' + JSON.stringify(ORIG_META_RAW) + ';\n';
@@ -1110,7 +1111,7 @@ async function performDataReset(){
   for(const d of RAW_DATA){
     tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec };
   }
-  favorites = new Set();
+  favorites = new Set(RAW_DATA.filter(d => d.fav).map(d => 'b' + d.no)); // data.js に記録されたお気に入りへ戻す
   rebuildData();
   await persistTrackState();
   await persistFavorites();
@@ -1199,7 +1200,7 @@ async function performDataImport(){
     Object.keys(ORIG_META).forEach(k=>delete ORIG_META[k]);
     Object.assign(ORIG_META, meta.origMeta);
   }
-  favorites = new Set();
+  favorites = new Set(tracks.filter(d => d.fav).map(d => 'b' + d.no));
   pendingImportArr = null;
   rebuildData();
   await persistTrackState();
@@ -1494,7 +1495,7 @@ function buildDataTransferHtml(){
       <button type="button" class="bar-tab" data-transfertab="import">インポート</button>
     </div>
     <div class="transfer-panel" data-transferpanel="export">
-      <p class="transfer-note" style="margin:0 0 12px;">現在の登録・編集・削除・お気に入りの状態を、QRコード／コード／5桁の番号のいずれかで別の端末へ引き継げます。</p>
+      <p class="transfer-note" style="margin:0 0 12px;">現在の登録・編集・削除・お気に入りの状態を、QRコード／コード／5桁の番号のいずれかで別の端末へ引き継げます。5桁の番号では、受信側との違いだけを送ります。</p>
       <div id="transferQrArea" style="display:flex; justify-content:center; margin-bottom:12px;"><span class="transfer-note">生成中…</span></div>
       <textarea id="transferExportCode" readonly rows="3" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="生成中…"></textarea>
       <button type="button" class="btn btn-primary" id="transferCopyBtn" style="margin-top:10px; width:100%;">コードをコピー</button>
@@ -1502,7 +1503,7 @@ function buildDataTransferHtml(){
       <div class="p2p-number" id="p2pNumber"></div>
     </div>
     <div class="transfer-panel" data-transferpanel="import" style="display:none;">
-      <p class="transfer-note" style="margin:0 0 12px;">コードを貼り付けるか、QRコードの読み取り、または送信側に表示された5桁の番号で受け取れます。適用すると現在のデータは上書きされます。</p>
+      <p class="transfer-note" style="margin:0 0 12px;">コードを貼り付けるかQRコードを読み取ると、現在のデータは上書きされます。送信側に表示された5桁の番号で受け取った場合は、違いだけを確認して、項目ごとに選んで反映できます。</p>
       <textarea id="transferImportCode" rows="3" style="width:100%; box-sizing:border-box; font-size:11px; resize:vertical;" placeholder="ここにコードを貼り付け"></textarea>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button type="button" class="btn btn-primary" id="transferImportBtn" style="flex:1;">このコードを適用する</button>
@@ -1567,10 +1568,173 @@ async function startTransferScan(){
   })();
 }
 
-// ----- 5桁の番号でP2P送受信（PeerJS公開サーバー経由で接続し、データは端末間で直接送る） -----
+// ----- 5桁の番号でP2P差分同期（PeerJS公開サーバー経由で接続し、データは端末間で直接送る） -----
+// 流れ: ①受信側が自分の曲一覧のハッシュ（キー＋内容）を送る → ②送信側が違う所だけを返す → ③受信側が内容を確認して項目ごとに選んで適用。
+// 同じ曲の判定: 曲名＋サークル名が一致（全角/半角・大文字/小文字・前後空白は無視。複数サークルは並び順を無視）。
+// 一方通行: エクスポート側（番号を表示する側）→インポート側（番号を入力する側）。
+
+// === SYNC-CORE-BEGIN ===
+const SYNC_FIELDS = [['title','曲名'],['circle','サークル'],['orig','原曲'],['sec','尺'],['fav','お気に入り']];
+const syncNorm = s => String(s ?? '').normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
+const syncCircles = c => String(c || '').split('\u3000').map(s => s.trim()).filter(Boolean).sort();
+function syncHash(str){ // cyrb53（衝突しにくい53bitハッシュ）
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for(let i = 0; i < str.length; i++){
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+function syncVal(t, f){ // 内容比較用の値（サークルは並び順を無視）
+  if(f === 'circle') return syncCircles(t.circle).join('\u3000');
+  if(f === 'fav') return !!t.fav;
+  if(f === 'sec') return t.sec ?? null;
+  return String(t[f] ?? '');
+}
+function syncIndex(tracks){
+  const seen = {};
+  return tracks.map(t => {
+    const base = syncNorm(t.title) + '\u0000' + syncCircles(t.circle).map(syncNorm).sort().join('\u0001');
+    const n = seen[base] = (seen[base] ?? -1) + 1; // 同じキーが複数ある場合は出現順で区別
+    return { t, kh: syncHash(base + '\u0002' + n), ch: syncHash(SYNC_FIELDS.map(([f]) => JSON.stringify(syncVal(t, f))).join('\u0000')) };
+  });
+}
+const syncManifest = tracks => syncIndex(tracks).map(x => [x.kh, x.ch]);
+const syncRow = t => [t.title, t.circle || '', t.orig || '', t.sec ?? null, t.fav ? 1 : 0];
+const syncRowToTrack = r => ({ title: r[0], circle: r[1], orig: r[2], sec: r[3], fav: !!r[4] });
+
+// 送信側：相手のmanifestと比べ、相手に無い曲(add)・内容が違う曲(chg)・自分に無い曲のキー(del)だけを返す
+function syncBuildReply(senderTracks, manifest){
+  const mine = syncIndex(senderTracks);
+  const theirs = new Map(manifest);
+  const mineKeys = new Set(mine.map(x => x.kh));
+  const add = [], chg = [];
+  for(const x of mine){
+    if(!theirs.has(x.kh)) add.push(syncRow(x.t));
+    else if(theirs.get(x.kh) !== x.ch) chg.push([x.kh, ...syncRow(x.t)]);
+  }
+  const del = manifest.filter(([kh]) => !mineKeys.has(kh)).map(([kh]) => kh);
+  return { v: 5, add, chg, del };
+}
+
+// 受信側：返ってきた差分を自分のデータに当てはめ、「どこをどう変えるか」の一覧にする
+function syncResolve(localTracks, reply){
+  const byKh = new Map(syncIndex(localTracks).map(x => [x.kh, x]));
+  const adds = reply.add.map(r => ({ t: syncRowToTrack(r) }));
+  const chgs = [];
+  for(const [kh, ...r] of reply.chg){
+    const x = byKh.get(kh); if(!x) continue;
+    const to = syncRowToTrack(r);
+    const fields = SYNC_FIELDS
+      .filter(([f]) => JSON.stringify(syncVal(x.t, f)) !== JSON.stringify(syncVal(to, f)))
+      .map(([f, label]) => ({ f, label, from: syncVal(x.t, f), to: syncVal(to, f), val: f === 'circle' ? to.circle : syncVal(to, f) }));
+    if(fields.length) chgs.push({ id: x.t.id, title: x.t.title, fields });
+  }
+  const dels = reply.del.map(kh => byKh.get(kh)).filter(Boolean).map(x => ({ id: x.t.id, t: x.t }));
+  return { adds, chgs, dels, total: adds.length + chgs.length + dels.length };
+}
+// === SYNC-CORE-END ===
+
+const syncLocalTracks = () => data.map(d => ({ id: d.id, title: d.title, circle: d.circle, orig: d.orig, sec: d.sec, fav: favorites.has(d.id) }));
+
+function syncShow(f, v){
+  if(f === 'fav') return v ? '★ あり' : 'なし';
+  if(f === 'sec') return fmtSec(v);
+  if(f === 'circle') return v ? String(v).split('\u3000').join(' / ') : '（空）';
+  return v === '' || v === null ? '（空）' : String(v);
+}
+
+let syncDiff = null;
+function buildSyncPreviewHtml(diff){
+  if(!diff.total){
+    return `<div class="track-detail"><div class="field title"><div class="flabel">変更：0件</div></div>
+      <p class="transfer-note" style="margin:0;">送信側との違いはありませんでした。</p></div>`;
+  }
+  const rowStyle = 'display:flex; gap:8px; align-items:flex-start; padding:6px 0; font-size:13px;';
+  const cb = (key, checked) => `<input type="checkbox" data-sync="${key}" ${checked ? 'checked' : ''} style="margin-top:3px; flex:none;">`;
+  const sub = t => escapeHtml([t.circle ? syncShow('circle', t.circle) : '', t.orig ? t.orig.split('\u3000').join(' / ') : '', t.sec != null ? fmtSec(t.sec) : ''].filter(Boolean).join('　｜　'));
+  const addRows = diff.adds.map((a, i) => `<label style="${rowStyle}">${cb('a:' + i, true)}<span><b>${escapeHtml(a.t.title)}</b>${a.t.fav ? ' ★' : ''}<br><span style="color:var(--ink-faint); font-size:12px;">${sub(a.t)}</span></span></label>`).join('');
+  const chgRows = diff.chgs.map((c, i) => `<div style="padding:6px 0; border-top:1px solid var(--line, rgba(255,255,255,.08));">
+      <div style="font-size:13px; font-weight:bold;">${escapeHtml(c.title)}</div>
+      ${c.fields.map(fl => `<label style="${rowStyle}">${cb('c:' + i + ':' + fl.f, true)}<span>${fl.label}：<span style="color:var(--ink-faint);">${escapeHtml(syncShow(fl.f, fl.from))}</span> → <b>${escapeHtml(syncShow(fl.f, fl.to))}</b></span></label>`).join('')}
+    </div>`).join('');
+  const delRows = diff.dels.map((d, i) => `<label style="${rowStyle}">${cb('d:' + i, false)}<span><b>${escapeHtml(d.t.title)}</b><br><span style="color:var(--ink-faint); font-size:12px;">${sub(d.t)}</span></span></label>`).join('');
+  const section = (title, count, body, open) => count ? `<details ${open ? 'open' : ''} style="margin-top:12px;"><summary style="cursor:pointer; font-size:14px;">${title}（${count}件）</summary>${body}</details>` : '';
+  return `<div class="track-detail">
+    <div class="field title"><div class="flabel">変更：${diff.total}件</div></div>
+    <p class="transfer-note" style="margin:0;">追加 ${diff.adds.length}件・変更 ${diff.chgs.length}件・削除候補 ${diff.dels.length}件。チェックを入れた内容だけがこの端末に反映されます。</p>
+    <div style="display:flex; gap:8px; margin-top:10px;">
+      <button type="button" class="btn btn-ghost" id="syncAllBtn" style="flex:1;">追加・変更をすべて選択</button>
+      <button type="button" class="btn btn-ghost" id="syncNoneBtn" style="flex:1;">すべて解除</button>
+    </div>
+    ${section('追加（この端末に無い曲）', diff.adds.length, addRows, diff.adds.length <= 30)}
+    ${section('変更（項目ごとに選べます）', diff.chgs.length, chgRows, true)}
+    ${section('削除候補（この端末にだけある曲。チェックすると削除）', diff.dels.length, delRows, true)}
+    <div class="detail-actions">
+      <button type="button" class="btn btn-ghost" id="syncCancelBtn">キャンセル</button>
+      <button type="button" class="btn btn-primary" id="syncApplyBtn">選択した内容を適用（0件）</button>
+    </div>
+  </div>`;
+}
+function syncSelection(){
+  const sel = { adds: [], chgs: new Map(), dels: [] };
+  modalBody.querySelectorAll('[data-sync]:checked').forEach(el => {
+    const [k, i, f] = el.dataset.sync.split(':');
+    if(k === 'a') sel.adds.push(+i);
+    else if(k === 'd') sel.dels.push(+i);
+    else if(k === 'c'){ const cur = sel.chgs.get(+i) || []; cur.push(f); sel.chgs.set(+i, cur); }
+  });
+  sel.count = sel.adds.length + sel.chgs.size + sel.dels.length;
+  return sel;
+}
+function syncUpdateCount(){
+  const btn = document.getElementById('syncApplyBtn');
+  if(btn) btn.textContent = `選択した内容を適用（${syncSelection().count}件）`;
+}
+function showSyncPreview(reply){
+  const ok = reply && reply.v === 5 && ['add','chg','del'].every(k => Array.isArray(reply[k]));
+  if(!ok) return transferMsg('受信した内容が正しくありません。');
+  syncDiff = syncResolve(syncLocalTracks(), reply);
+  openModal('データ引き継ぎ：変更内容の確認', buildSyncPreviewHtml(syncDiff));
+  syncUpdateCount();
+}
+async function syncApplyNow(){
+  if(!syncDiff) return;
+  const sel = syncSelection();
+  if(!sel.count) return;
+  if(sel.dels.length && !confirm(`${sel.dels.length}曲を削除します。よろしいですか？`)) return;
+  for(const i of sel.adds){
+    const t = syncDiff.adds[i].t, id = makeId();
+    tracksById[id] = { title: t.title, circle: t.circle, orig: t.orig, sec: t.sec };
+    order.push(id);
+    if(t.fav) favorites.add(id);
+  }
+  for(const [ci, fs] of sel.chgs){
+    const c = syncDiff.chgs[ci];
+    if(!(c.id in tracksById)) continue;
+    for(const f of fs){
+      const val = c.fields.find(x => x.f === f).val;
+      if(f === 'fav'){ if(val) favorites.add(c.id); else favorites.delete(c.id); }
+      else tracksById[c.id] = { ...tracksById[c.id], [f]: val };
+    }
+  }
+  for(const i of sel.dels){ const d = syncDiff.dels[i]; if(d.id in tracksById) deleteTrack(d.id); }
+  rebuildData();
+  await persistTrackState();
+  await persistFavorites();
+  render();
+  const summary = `追加 ${sel.adds.length}件・変更 ${sel.chgs.size}件・削除 ${sel.dels.length}件`;
+  syncDiff = null;
+  closeModal();
+  openModal('反映しました', `<p style="font-size:13px; margin:0;">${summary}を反映しました。</p>`);
+}
+
 let p2p = null;
 function p2pStop(){ if(p2p){ try{ p2p.destroy(); }catch(e){} p2p = null; } }
 
+// 送信側（エクスポート）：番号を表示して待つ。受信側のmanifestが届いたら差分だけを返す
 function p2pSend(){
   p2pStop();
   if(typeof Peer !== 'function') return transferMsg('通信ライブラリを読み込めませんでした。コードをご利用ください。');
@@ -1578,14 +1742,20 @@ function p2pSend(){
   const peer = p2p = new Peer(P2P_PREFIX + num);
   peer.on('open', () => { setText('p2pNumber', num); transferMsg('受信側で、この番号を入力してください（この画面を開いたままにしてください）。'); });
   peer.on('error', e => e.type === 'unavailable-id' ? p2pSend() : transferMsg('通信エラー: ' + e.type)); // 番号が重複したら振り直す
-  peer.on('connection', conn => conn.on('open', async () => {
-    conn.send(await compressToCode(buildTransferPayloadJson()));
-    setText('p2pNumber', '');
-    transferMsg('送信しました。');
-    conn.on('close', p2pStop);
-  }));
+  peer.on('connection', conn => {
+    transferMsg('受信側と接続しました。差分を確認しています…');
+    conn.on('data', msg => {
+      if(!msg || msg.v !== 5 || !Array.isArray(msg.items)) return;
+      const reply = syncBuildReply(syncLocalTracks(), msg.items);
+      conn.send(reply);
+      setText('p2pNumber', '');
+      transferMsg(`差分を送信しました（追加 ${reply.add.length}件・変更 ${reply.chg.length}件・相手にだけある曲 ${reply.del.length}件）。適用は受信側で選びます。`);
+    });
+    conn.on('close', () => { p2pStop(); });
+  });
 }
 
+// 受信側（インポート）：5桁の番号で接続し、自分のmanifestを送って差分を受け取り、確認画面を出す
 function p2pReceive(){
   p2pStop();
   const num = (document.getElementById('p2pInput')?.value || '').trim();
@@ -1596,8 +1766,9 @@ function p2pReceive(){
   const peer = p2p = new Peer();
   peer.on('error', e => transferMsg(e.type === 'peer-unavailable' ? 'その番号の端末が見つかりません。送信側の画面が開いているか確認してください。' : '通信エラー: ' + e.type));
   peer.on('open', () => {
-    const conn = peer.connect(P2P_PREFIX + num);
-    conn.on('data', async code => { got = true; p2pStop(); await applyTransferCode(code); });
+    const conn = peer.connect(P2P_PREFIX + num, { reliable: true });
+    conn.on('open', () => { transferMsg('差分を確認しています…'); conn.send({ v: 5, items: syncManifest(syncLocalTracks()) }); });
+    conn.on('data', reply => { got = true; p2pStop(); showSyncPreview(reply); });
   });
   setTimeout(() => { if(p2p === peer && !got) transferMsg('接続できませんでした。もう一度お試しください。'); }, 20000);
 }
@@ -1889,6 +2060,15 @@ modalBody.addEventListener('click', async e=>{
   if(!row) return;
   fillSearchAndClose(row.dataset.fill);
 });
+
+// 差分同期の確認画面（5桁P2P）
+modalBody.addEventListener('click', async e => {
+  if(e.target.closest('#syncAllBtn')){ modalBody.querySelectorAll('[data-sync^="a:"],[data-sync^="c:"]').forEach(el => el.checked = true); syncUpdateCount(); return; }
+  if(e.target.closest('#syncNoneBtn')){ modalBody.querySelectorAll('[data-sync]').forEach(el => el.checked = false); syncUpdateCount(); return; }
+  if(e.target.closest('#syncCancelBtn')){ syncDiff = null; closeModal(); return; }
+  if(e.target.closest('#syncApplyBtn')){ await syncApplyNow(); return; }
+});
+modalBody.addEventListener('change', e => { if(e.target.matches('[data-sync]')) syncUpdateCount(); });
 
 // スワイプ（左→次の曲 / 右→前の曲）と ←→ キーで詳細の前後移動
 let swipeStart = null;
@@ -2594,7 +2774,9 @@ function initSky(){
         if(t.no !== undefined) legacyNoToId[t.no] = id;
       }
     }
+    RAW_DATA.forEach(d => { if(d.fav) favorites.add('b' + d.no); }); // data.js に記録されたお気に入り
     await persistTrackState();
+    await persistFavorites();
   }
   rebuildData();
 
