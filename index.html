@@ -18,6 +18,17 @@
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
+<style>
+  .orig-tools{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .orig-tools .btn{ flex:1; min-width:110px; }
+  .orig-tools .btn.on{ background:var(--gold); color:#111; }
+  .drag-handle{ cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none; padding:6px 10px; font-size:16px; line-height:1; }
+  .dragging{ opacity:.45; }
+  .drop-before{ box-shadow:0 -3px 0 var(--gold, #e0b050); }
+  .drop-after{ box-shadow:0 3px 0 var(--gold, #e0b050); }
+  .orig-move-row{ display:flex; align-items:center; gap:8px; padding:8px 4px; font-size:13px; }
+  .work-group summary{ display:flex; align-items:center; gap:8px; }
+</style>
 </head>
 <body>
 
@@ -139,7 +150,6 @@
       <button type="button" class="sc-btn" data-sc="原曲()">原曲</button>
       <button type="button" class="sc-btn" data-sc="&quot;only ">only</button>
       <button type="button" class="sc-btn" data-sc="&quot;不明">不明</button>
-      <button type="button" class="sc-btn" data-sc="&quot;重複">重複</button>
     </div>
     <button type="button" class="yt-search-btn" id="ytSearchBtn" title="検索欄に「No.80」「80」などNo.を入力してから押すと、その曲をYouTubeで検索します">▶ YouTube</button>
     <select id="sortSelect">
@@ -194,6 +204,8 @@
 <script>
 const WORKS_ORDER = ORIG_META_RAW.worksOrder;
 const ORIG_META = ORIG_META_RAW.origMeta;
+const ADDED_WORKS = (ORIG_META_RAW.addedWorks = ORIG_META_RAW.addedWorks || []); // 追加した作品（曲数0でも表示する）
+const ORIG_META_ORIGINAL = JSON.stringify(ORIG_META_RAW); // data.js 読み込み時点の作品分類（リセット用）
 
 // ---------- storage ----------
 // Claude.ai 上では window.storage を優先して使う。
@@ -246,7 +258,7 @@ async function storeSet(key, value){
 // tracksById: id -> {title,circle,orig,sec}  /  order: [id,...] canonical No.1..N sequence
 let favorites = new Set(); // Set of ids
 let sortKey = 'no';
-let sortDir = 1;
+let sortDir = -1; // 初期状態は登録順の降順（新しい曲が上）
 let filters = { q:'' };
 
 let tracksById = {};
@@ -1025,6 +1037,7 @@ document.querySelectorAll('.menu-dropdown button[data-modal]').forEach(btn=>{
     if(type === 'stats') openModal('データ', buildStatsHtml());
     if(type === 'circleSingle') openModal('サークル一覧（単）', buildCircleListHtml(false));
     if(type === 'circleMulti') openModal('サークル一覧（複）', buildCircleListHtml(true));
+    if(type === 'origSingle' || type === 'origMulti'){ origOpenWorks.clear(); origReorder = false; }
     if(type === 'origSingle') openModal('原曲一覧（単）', buildOrigListSingleHtml());
     if(type === 'origMulti') openModal('原曲一覧（複）', buildOrigListMultiHtml());
     if(type === 'bgSettings') openModal('背景変更', buildBackgroundSettingsHtml());
@@ -1111,6 +1124,8 @@ async function performDataReset(){
   for(const d of RAW_DATA){
     tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec };
   }
+  applyOrigMetaState(JSON.parse(ORIG_META_ORIGINAL)); // 作品分類も data.js 読み込み時点へ戻す
+  await persistOrigMeta();
   favorites = new Set(RAW_DATA.filter(d => d.fav).map(d => 'b' + d.no)); // data.js に記録されたお気に入りへ戻す
   rebuildData();
   await persistTrackState();
@@ -1194,11 +1209,8 @@ async function performDataImport(){
     tracksById['b' + d.no] = { title: d.title, circle: d.circle || '', orig: d.orig || '', sec: d.sec ?? null };
   }
   if(meta && meta.worksOrder && meta.origMeta){
-    ORIG_META_RAW.worksOrder = meta.worksOrder;
-    ORIG_META_RAW.origMeta = meta.origMeta;
-    WORKS_ORDER.length = 0; WORKS_ORDER.push(...meta.worksOrder);
-    Object.keys(ORIG_META).forEach(k=>delete ORIG_META[k]);
-    Object.assign(ORIG_META, meta.origMeta);
+    applyOrigMetaState(meta);
+    await persistOrigMeta();
   }
   favorites = new Set(tracks.filter(d => d.fav).map(d => 'b' + d.no));
   pendingImportArr = null;
@@ -1242,7 +1254,7 @@ function buildCircleListHtml(multi){
     <div class="flat-list" id="flatListBody">${rowsHtml}</div>`;
 }
 
-// ----- 原曲一覧（単） -----
+// ----- 原曲一覧（単）：作品・原曲の追加／並び替え -----
 function classifyOrig(orig){
   const comps = splitComponents(orig);
   if(comps.length > 1) return '__medley__';
@@ -1254,37 +1266,72 @@ function origStageOrder(orig){
   return (meta && typeof meta.order === 'number') ? meta.order : 500;
 }
 
-function buildOrigListSingleHtml(){
+const EXTRA_WORK_CANDIDATES = ['儚月抄','三月精','茨歌仙','鈴奈庵','香霖堂','求聞史紀','文果真報','外來韋編']; // 作品追加の入力候補（まだ登録されていないもの）
+let origReorder = false;            // 並び替えモード
+const origOpenWorks = new Set();    // 開いている作品（再描画しても開いたままにする）
+const nfkc = s => String(s).normalize('NFKC');
+
+async function persistOrigMeta(){ await storeSet('origMetaState', { worksOrder: WORKS_ORDER, origMeta: ORIG_META, addedWorks: ADDED_WORKS }); }
+function applyOrigMetaState(m){ // 保存された作品分類を、data.js 由来の参照表に上書きする（同じ配列・オブジェクトを書き換える）
+  if(!m || !Array.isArray(m.worksOrder) || !m.origMeta || typeof m.origMeta !== 'object') return;
+  WORKS_ORDER.length = 0; WORKS_ORDER.push(...m.worksOrder);
+  Object.keys(ORIG_META).forEach(k => delete ORIG_META[k]);
+  Object.assign(ORIG_META, m.origMeta);
+  ADDED_WORKS.length = 0; ADDED_WORKS.push(...(Array.isArray(m.addedWorks) ? m.addedWorks : []));
+}
+
+function origSingleBuckets(){
   const counts = {};
   for(const d of data){ if(!d.orig) continue; counts[d.orig] = (counts[d.orig]||0)+1; }
-  const buckets = {};
-  const unknown = [];
+  const buckets = {}, unknown = [];
   for(const [orig,count] of Object.entries(counts)){
     const cat = classifyOrig(orig);
     if(cat === '__medley__') continue; // 複数原曲は原曲一覧（複）へ
     if(cat === '__unknown__') unknown.push({orig,count});
     else (buckets[cat] = buckets[cat]||[]).push({orig,count});
   }
-  let html = '';
-  for(const work of WORKS_ORDER){
-    const list = buckets[work];
-    if(!list || !list.length) continue;
-    list.sort((a,b)=> origStageOrder(a.orig) - origStageOrder(b.orig) || a.orig.localeCompare(b.orig,'ja'));
-    const trackTotal = list.reduce((s,x)=>s+x.count,0);
-    html += `<details class="work-group"><summary><span class="wname">${escapeHtml(work)}</span><span class="wcount">${list.length}曲 / ${trackTotal}トラック</span></summary>
-      <div class="orig-sub">${list.map(x=>`<button class="list-row" data-fill="${escapeHtml(x.orig)}"><span>${escapeHtml(x.orig)}</span><span class="cnt">${x.count}</span></button>`).join('')}</div>
-    </details>`;
+  for(const [orig,m] of Object.entries(ORIG_META)){ // 追加した原曲は、曲数0でも表示する
+    if(!m.added || counts[orig] || !WORKS_ORDER.includes(m.category)) continue;
+    (buckets[m.category] = buckets[m.category]||[]).push({orig,count:0});
   }
-  if(unknown.length){
-    unknown.sort((a,b)=>a.orig.localeCompare(b.orig,'ja'));
-    html += `<details class="work-group"><summary><span class="wname">作品分類不明</span><span class="wcount">${unknown.length}曲</span></summary>
-      <div class="orig-sub">${unknown.map(x=>`<button class="list-row" data-fill="${escapeHtml(x.orig)}"><span>${escapeHtml(x.orig)}</span><span class="cnt">${x.count}</span></button>`).join('')}</div>
-    </details>`;
-  }
-  return html || '<div class="list-empty">該当する原曲がありません</div>';
+  for(const w of Object.keys(buckets)) buckets[w].sort((a,b)=> origStageOrder(a.orig) - origStageOrder(b.orig) || a.orig.localeCompare(b.orig,'ja'));
+  unknown.sort((a,b)=>a.orig.localeCompare(b.orig,'ja'));
+  return { buckets, unknown };
+}
+const origVisibleWorks = buckets => WORKS_ORDER.filter(w => (buckets[w] && buckets[w].length) || ADDED_WORKS.includes(w));
+
+function buildOrigToolsHtml(withReorder){
+  return `<div class="orig-tools">
+      <button type="button" class="btn btn-ghost" data-oact="showWork">＋ 作品を追加</button>
+      ${withReorder ? `<button type="button" class="btn btn-ghost" data-oact="showSong">＋ 原曲を追加</button>
+      <button type="button" class="btn btn-ghost${origReorder ? ' on' : ''}" data-oact="reorder">${origReorder ? '並び替えを終了' : '並び替え'}</button>` : ''}
+    </div><div id="origAddArea"></div>`;
 }
 
-// ----- 原曲一覧（複） -----
+function buildOrigListSingleHtml(){
+  const { buckets, unknown } = origSingleBuckets();
+  const vis = origVisibleWorks(buckets);
+  let html = `<div id="origRoot" data-view="single">${buildOrigToolsHtml(true)}`;
+  vis.forEach((work, wi) => {
+    const list = buckets[work] || [];
+    const trackTotal = list.reduce((s,x)=>s+x.count,0);
+    const wmv = origReorder ? '<span class="drag-handle" data-drag="work" title="ドラッグで作品を並び替え">☰</span>' : '';
+    const rows = list.map(x => origReorder
+      ? `<div class="orig-move-row" data-orig="${escapeHtml(x.orig)}"><span class="drag-handle" data-drag="song" title="ドラッグで原曲を並び替え">☰</span><span>${escapeHtml(x.orig)}</span></div>`
+      : `<button class="list-row" data-oact="song" data-orig="${escapeHtml(x.orig)}"><span>${escapeHtml(x.orig)}</span><span class="cnt">${x.count}</span></button>`).join('');
+    html += `<details class="work-group" data-work="${escapeHtml(work)}" ${origReorder ? 'data-dragitem="1"' : ''} ${origOpenWorks.has(work) ? 'open' : ''}><summary>${wmv}<span class="wname">${escapeHtml(work)}</span><span class="wcount">${list.length}曲 / ${trackTotal}トラック</span></summary>
+      <div class="orig-sub">${rows || '<div class="list-empty">まだ原曲がありません</div>'}</div>
+    </details>`;
+  });
+  if(unknown.length){ // 作品分類不明は常に一番下
+    html += `<details class="work-group" data-work="__unknown__" ${origOpenWorks.has('__unknown__') ? 'open' : ''}><summary><span class="wname">作品分類不明</span><span class="wcount">${unknown.length}曲</span></summary>
+      <div class="orig-sub">${unknown.map(x=>`<button class="list-row" data-oact="song" data-orig="${escapeHtml(x.orig)}"><span>${escapeHtml(x.orig)}</span><span class="cnt">${x.count}</span></button>`).join('')}</div>
+    </details>`;
+  }
+  return html + '</div>';
+}
+
+// ----- 原曲一覧（複）：複数原曲を、含まれる曲の作品ごとに表示（1曲でも含まれていればその作品に入る） -----
 function buildOrigListMultiHtml(){
   const groups = {};
   for(const d of data){
@@ -1293,14 +1340,171 @@ function buildOrigListMultiHtml(){
     if(!groups[key]) groups[key] = { comps, count:0 };
     groups[key].count += 1;
   }
-  const list = Object.values(groups).sort((a,b)=>a.comps.join('\u3000').localeCompare(b.comps.join('\u3000'),'ja'));
-  const rowsHtml = list.map(g=>{
-    const label = g.comps.join(' / ');
-    const fillVal = '"and ' + g.comps.join(' ');
-    return `<button class="list-row" data-fill="${escapeHtml(fillVal)}"><span>${escapeHtml(label)}</span><span class="cnt">${g.count}</span></button>`;
-  }).join('') || '<div class="list-empty">該当する原曲がありません</div>';
-  return `<input type="text" class="list-search" id="listSearchBox" placeholder="原曲名で絞り込み">
-    <div class="flat-list" id="flatListBody">${rowsHtml}</div>`;
+  const buckets = {}, unknown = [];
+  for(const g of Object.values(groups)){
+    const works = new Set();
+    for(const c of g.comps){ const m = ORIG_META[c]; if(m && m.category && !m.category.startsWith('__')) works.add(m.category); }
+    if(!works.size) unknown.push(g); else works.forEach(w => (buckets[w] = buckets[w]||[]).push(g));
+  }
+  const byName = (a,b)=>a.comps.join('\u3000').localeCompare(b.comps.join('\u3000'),'ja');
+  const row = g => `<button class="list-row" data-fill="${escapeHtml('"and ' + g.comps.join(' '))}"><span>${escapeHtml(g.comps.join(' / '))}</span><span class="cnt">${g.count}</span></button>`;
+  const section = (name, key, list) => {
+    list.sort(byName);
+    const tracks = list.reduce((s,g)=>s+g.count,0);
+    return `<details class="work-group" data-work="${escapeHtml(key)}" ${origOpenWorks.has(key) ? 'open' : ''}><summary><span class="wname">${escapeHtml(name)}</span><span class="wcount">${list.length}件 / ${tracks}トラック</span></summary>
+      <div class="orig-sub">${list.map(row).join('') || '<div class="list-empty">まだありません</div>'}</div></details>`;
+  };
+  let body = '';
+  for(const w of WORKS_ORDER){
+    if((buckets[w] && buckets[w].length) || ADDED_WORKS.includes(w)) body += section(w, w, buckets[w] || []);
+  }
+  if(unknown.length) body += section('作品分類不明', '__unknown__', unknown);
+  return `<div id="origRoot" data-view="multi">${buildOrigToolsHtml(false)}
+    <p style="color:var(--ink-faint); font-size:11.5px; margin:6px 0 8px;">複数の作品の曲を含むものは、それぞれの作品に表示されます。</p>
+    <input type="text" class="list-search" id="listSearchBox" placeholder="原曲名で絞り込み">
+    <div id="flatListBody">${body || '<div class="list-empty">該当する原曲がありません</div>'}</div></div>`;
+}
+
+function refreshOrigLists(){
+  const root = document.getElementById('origRoot'); if(!root) return;
+  modalBody.querySelectorAll('details[data-work]').forEach(d => { if(d.open) origOpenWorks.add(d.dataset.work); else origOpenWorks.delete(d.dataset.work); });
+  const view = root.dataset.view;
+  modalBody.innerHTML = view === 'multi' ? buildOrigListMultiHtml() : buildOrigListSingleHtml();
+}
+function origMsg(text){ const el = document.getElementById('origAddMsg'); if(el){ el.textContent = text; el.style.display = text ? 'block' : 'none'; } }
+
+function buildOrigAddForm(kind){
+  if(kind === 'work'){
+    const cands = EXTRA_WORK_CANDIDATES.filter(c => !WORKS_ORDER.some(w => nfkc(w) === nfkc(c)));
+    return `<div class="track-detail"><div class="edit-field"><label>作品名（必須）</label>
+      <input type="text" id="origWorkInput" list="origWorkCandidates" placeholder="例）紅魔郷、妖々夢" autocomplete="off">
+      <datalist id="origWorkCandidates">${cands.map(c=>`<option value="${escapeHtml(c)}"></option>`).join('')}</datalist></div>
+      <div class="edit-error" id="origAddMsg" style="display:none;"></div>
+      <div class="detail-actions"><button type="button" class="btn btn-ghost" data-oact="cancelAdd">閉じる</button><button type="button" class="btn btn-primary" data-oact="addWork">追加</button></div></div>`;
+  }
+  const { unknown } = origSingleBuckets();
+  const cands = unknown.sort((a,b)=>b.count-a.count).slice(0, 500);
+  return `<div class="track-detail">
+    <div class="edit-field"><label>原曲名（必須）</label>
+      <input type="text" id="origSongInput" list="origSongCandidates" placeholder="例）亡き王女の為のセプテット" autocomplete="off">
+      <datalist id="origSongCandidates">${cands.map(x=>`<option value="${escapeHtml(x.orig)}"></option>`).join('')}</datalist></div>
+    <div class="edit-field"><label>追加する場所（作品名・必須）</label>
+      <input type="text" id="origSongWorkInput" list="origSongWorkList" placeholder="例）紅魔郷" autocomplete="off">
+      <datalist id="origSongWorkList">${WORKS_ORDER.map(w=>`<option value="${escapeHtml(w)}"></option>`).join('')}</datalist></div>
+    <p class="transfer-note" style="margin:0 0 6px;">原曲名の候補は、作品分類不明の原曲です。選ぶと、その原曲が指定した作品に入ります。</p>
+    <div class="edit-error" id="origAddMsg" style="display:none;"></div>
+    <div class="detail-actions"><button type="button" class="btn btn-ghost" data-oact="cancelAdd">閉じる</button><button type="button" class="btn btn-primary" data-oact="addSong">追加</button></div></div>`;
+}
+
+async function origAddWork(){
+  const name = (document.getElementById('origWorkInput')?.value || '').trim();
+  if(!name) return origMsg('作品名を入力してください。');
+  if(WORKS_ORDER.some(w => nfkc(w) === nfkc(name))) return origMsg(`「${name}」は既に登録されています。`);
+  WORKS_ORDER.push(name); ADDED_WORKS.push(name); // 新しい作品は一番下（作品分類不明の上）に追加
+  origOpenWorks.add(name);
+  await persistOrigMeta();
+  refreshOrigLists();
+}
+async function origAddSong(){
+  const title = (document.getElementById('origSongInput')?.value || '').trim();
+  const workIn = (document.getElementById('origSongWorkInput')?.value || '').trim();
+  if(!title) return origMsg('原曲名を入力してください。');
+  if(!workIn) return origMsg('追加する作品名を入力してください。');
+  if(title.includes('\u3000')) return origMsg('原曲名に全角スペースは使えません（複数原曲は曲ごとに分けて登録してください）。');
+  const work = WORKS_ORDER.find(w => nfkc(w) === nfkc(workIn));
+  if(!work) return origMsg(`作品「${workIn}」はまだ登録されていません。先に「＋ 作品を追加」で追加してください。`);
+  const cur = ORIG_META[title];
+  if(cur && cur.category && !cur.category.startsWith('__')) return origMsg(`「${title}」は既に「${cur.category}」に登録されています。`);
+  const maxOrder = Math.max(0, ...Object.values(ORIG_META).filter(m => m.category === work && typeof m.order === 'number').map(m => m.order));
+  ORIG_META[title] = { category: work, order: maxOrder + 1, added: true }; // 作品の中の一番下に追加
+  origOpenWorks.add(work);
+  await persistOrigMeta();
+  refreshOrigLists();
+}
+// ドラッグで並び替えた結果（DOMの並び）を、作品の並び・原曲の並びに反映する
+async function origApplyDomOrder(kind, parent){
+  if(kind === 'work'){
+    const names = [...modalBody.querySelectorAll('details[data-dragitem]')].map(el => el.dataset.work);
+    const idxs = names.map(w => WORKS_ORDER.indexOf(w)).filter(i => i >= 0).sort((a,b)=>a-b);
+    names.forEach((w, k) => { WORKS_ORDER[idxs[k]] = w; }); // 表示されている作品の位置だけを入れ替える
+  } else {
+    const names = [...parent.querySelectorAll('.orig-move-row')].map(el => el.dataset.orig);
+    names.forEach((n, k) => { if(ORIG_META[n]) ORIG_META[n] = { ...ORIG_META[n], order: k + 1 }; }); // 作品内の並びを連番にし直す
+  }
+  await persistOrigMeta();
+  refreshOrigLists();
+}
+function origScroller(el){
+  for(let n = el.parentElement; n; n = n.parentElement){
+    const o = getComputedStyle(n).overflowY;
+    if((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n;
+  }
+  return null;
+}
+modalBody.addEventListener('pointerdown', e => {
+  const h = e.target.closest('.drag-handle'); if(!h || !origReorder) return;
+  e.preventDefault();
+  const kind = h.dataset.drag;
+  const sel = kind === 'work' ? 'details[data-dragitem]' : '.orig-move-row';
+  const item = h.closest(sel); if(!item) return;
+  const parent = item.parentElement, scroller = origScroller(item);
+  let target = null, after = false;
+  const clear = () => parent.querySelectorAll('.drop-before,.drop-after').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+  item.classList.add('dragging');
+  try{ h.setPointerCapture(e.pointerId); }catch(err){}
+  const move = ev => {
+    const y = ev.clientY;
+    if(scroller){ const r = scroller.getBoundingClientRect(); if(y < r.top + 40) scroller.scrollTop -= 12; else if(y > r.bottom - 40) scroller.scrollTop += 12; }
+    clear(); target = null;
+    for(const c of [...parent.children].filter(c => c !== item && c.matches(sel))){
+      const r = c.getBoundingClientRect();
+      if(y >= r.top && y <= r.bottom){ target = c; after = y >= r.top + r.height / 2; c.classList.add(after ? 'drop-after' : 'drop-before'); break; }
+    }
+  };
+  const up = async () => {
+    h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up);
+    clear(); item.classList.remove('dragging');
+    if(!target) return;
+    parent.insertBefore(item, after ? target.nextSibling : target);
+    await origApplyDomOrder(kind, parent);
+  };
+  h.addEventListener('pointermove', move); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+});
+
+// ----- 原曲一覧：原曲をクリックしたときの画面（作品名を指定＝作品の移動／検索／削除） -----
+function buildOrigSongModalHtml(orig){
+  const meta = ORIG_META[orig];
+  const work = meta && meta.category && !meta.category.startsWith('__') ? meta.category : null;
+  const cnt = data.filter(d => d.orig === orig).length;
+  return `<div class="track-detail" id="origSongBox" data-orig="${escapeHtml(orig)}">
+    <div class="field title"><div class="flabel">原曲</div><div class="fvalue">${escapeHtml(orig)}</div></div>
+    <p class="transfer-note" style="margin:0 0 8px;">${work ? '作品：' + escapeHtml(work) : '作品分類不明'}・${cnt}トラック</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn btn-ghost" data-oact="songMove" style="flex:1; min-width:110px;">作品名を指定</button>
+      <button type="button" class="btn btn-ghost" data-oact="songSearch" style="flex:1; min-width:110px;">検索</button>
+      ${work ? '<button type="button" class="btn btn-ghost" data-oact="songDelete" style="flex:1; min-width:110px;">削除</button>' : ''}
+    </div>
+    <div id="origSongArea"></div>
+    <div class="detail-actions"><button type="button" class="btn btn-ghost" data-oact="songBack">一覧に戻る</button></div>
+  </div>`;
+}
+function showOrigSingleList(){ modalTitle.textContent = '原曲一覧（単）'; modalBody.innerHTML = buildOrigListSingleHtml(); }
+async function origMoveSongTo(orig, workIn){
+  const work = WORKS_ORDER.find(w => nfkc(w) === nfkc(workIn.trim()));
+  if(!workIn.trim()) return origMsg('移動先の作品名を入力してください。');
+  if(!work) return origMsg(`作品「${workIn.trim()}」はまだ登録されていません。先に「＋ 作品を追加」で追加してください。`);
+  const cur = ORIG_META[orig];
+  if(cur && cur.category === work) return origMsg(`「${orig}」は既に「${work}」にあります。`);
+  const maxOrder = Math.max(0, ...Object.values(ORIG_META).filter(m => m.category === work && typeof m.order === 'number').map(m => m.order));
+  ORIG_META[orig] = { ...(cur || {}), category: work, order: maxOrder + 1 }; // 移動先の作品の一番下に入る
+  origOpenWorks.add(work);
+  await persistOrigMeta();
+  showOrigSingleList();
+}
+async function origDeleteSong(orig){
+  delete ORIG_META[orig];
+  await persistOrigMeta();
+  showOrigSingleList();
 }
 
 // ----- 文字の置換（Excelのctrl+Hのような機能） -----
@@ -1463,23 +1667,32 @@ function buildTransferPayloadJson(){
 
 // 共通の基準からの差分コード（v6）：基準に重ねて送信側のデータを復元し、確認画面で項目ごとに選んで適用する
 async function applyTransferDiff(p){
-  if(![p.add, p.chg, p.del].every(Array.isArray)) return transferMsg('コードの内容が正しくありません。');
-  let baseTracks = [];
+  let baseTracks = [], baseMeta = META_EMPTY();
+  const short = p.v === 7; // v7：照合用ハッシュを末尾8文字に短縮した、短いコード
+  const same = (full, given) => short ? full.slice(-8) === given : full === given;
   if(p.b !== null){
     const base = await loadSyncBase();
-    if(!base || base.hash !== p.b) return transferMsg('この端末の基準がコードと一致しません。送信側で「全体を送る」にチェックを入れたコードで引き継いでください。');
-    baseTracks = base.tracks;
+    if(!base || !same(base.hash, p.b)) return transferMsg('この端末の基準がコードと一致しません。送信側で「全体を送る」にチェックを入れたコードで引き継いでください。');
+    baseTracks = base.tracks; baseMeta = base.meta;
   }
+  if(short){
+    try{ p = syncUnpack(p, baseTracks, baseMeta); }catch(e){ return transferMsg('コードの内容を復元できませんでした。全体を送るコードで引き継ぎ直してください。'); }
+  }
+  if(![p.add, p.chg, p.del].every(Array.isArray)) return transferMsg('コードの内容が正しくありません。');
   const S = syncPatch(baseTracks, p);
-  if(syncStateHash(S) !== p.s) return transferMsg('コードの内容を復元できませんでした。全体を送るコードで引き継ぎ直してください。');
-  showSyncPreview(syncBuildReply(S, syncManifest(syncLocalTracks())), S);
+  if(!same(syncStateHash(S), p.s)) return transferMsg('コードの内容を復元できませんでした。全体を送るコードで引き継ぎ直してください。');
+  const MS = metaPatch(baseMeta, p.mb || { add: [], chg: [], del: [], w: null });
+  if(p.ms && !same(metaStateHash(MS), p.ms)) return transferMsg('原曲分類を復元できませんでした。全体を送るコードで引き継ぎ直してください。');
+  const reply = syncBuildReply(S, syncManifest(syncLocalTracks()));
+  reply.meta = metaBuildReply(MS, metaManifest(metaSnapshot()));
+  showSyncPreview(reply, S, MS);
 }
 
 async function applyTransferCode(code){
   let p;
   try{ p = JSON.parse(await decompressFromCode((code || '').trim())); }
   catch(e){ return transferMsg('コードを読み取れませんでした。正しいコードか確認してください。'); }
-  if(p && p.v === 6) return applyTransferDiff(p);
+  if(p && (p.v === 6 || p.v === 7)) return applyTransferDiff(p);
   if(!p || p.v !== 4 || !Array.isArray(p.e) || !Array.isArray(p.n) || !Array.isArray(p.d)) return transferMsg('コードの内容が正しくありません。');
 
   const toTrack = ([title, circle, orig, sec]) => ({ title, circle, orig, sec });
@@ -1542,9 +1755,12 @@ async function populateDataTransferExport(){
   const cur = syncLocalTracks();
   const base = full ? null : await loadSyncBase();
   const diff = syncBuildReply(cur, syncManifest(base ? base.tracks : []));
-  transferPendingBase = cur;
-  setText('transferDiffInfo', base ? `前回の引き継ぎからの差分：追加 ${diff.add.length}件・変更 ${diff.chg.length}件・削除 ${diff.del.length}件` : (full ? '全体を送るコードです（基準を使いません）。' : '共通の基準がまだ無いため、全体を送るコードです。'));
-  const code = await compressToCode(JSON.stringify({ v: 6, b: base ? base.hash : null, s: syncStateHash(cur), add: diff.add, chg: diff.chg, del: diff.del }));
+  const curMeta = metaSnapshot();
+  const mdiff = metaBuildReply(curMeta, metaManifest(base ? base.meta : META_EMPTY()));
+  transferPendingBase = { tracks: cur, meta: curMeta };
+  setText('transferDiffInfo', base ? `前回の引き継ぎからの差分：追加 ${diff.add.length}件・変更 ${diff.chg.length}件・削除 ${diff.del.length}件／原曲分類 ${mdiff.add.length + mdiff.chg.length + mdiff.del.length + (mdiff.w ? 1 : 0)}件` : (full ? '全体を送るコードです（基準を使いません）。' : '共通の基準がまだ無いため、全体を送るコードです。'));
+  const full6 = { v: 6, b: base ? base.hash : null, s: syncStateHash(cur), ms: metaStateHash(curMeta), add: diff.add, chg: diff.chg, del: diff.del, mb: mdiff };
+  const code = await compressToCode(JSON.stringify(syncPack(full6, base ? base.tracks : [], base ? base.meta : META_EMPTY()))); // 内容は同じまま、短い形に詰める
   const codeEl = document.getElementById('transferExportCode');
   if(!codeEl) return; // 生成中に閉じられた場合
   codeEl.value = code;
@@ -1674,6 +1890,86 @@ function syncPatch(baseTracks, reply){
   for(const r of reply.add) out.push(syncRowToTrack(r));
   return out;
 }
+// ----- 原曲分類（作品の並び・各原曲の作品と並び）の差分：スナップショット {w:作品順, a:追加作品, m:{原曲名:[作品,並び,追加フラグ]}} -----
+const META_EMPTY = () => ({ w: [], a: [], m: {} });
+const metaWorksHash = S => syncHash(JSON.stringify([S.w, S.a]));
+const metaRowHash = r => syncHash(JSON.stringify(r));
+const metaManifest = S => ({ w: metaWorksHash(S), m: Object.entries(S.m).map(([t, r]) => [syncHash(t), metaRowHash(r)]) });
+const metaStateHash = S => syncHash(JSON.stringify([S.w, S.a, Object.keys(S.m).sort().map(k => [k, S.m[k]])]));
+const syncBaseHash = (tracks, meta) => syncHash(syncStateHash(tracks) + '|' + metaStateHash(meta));
+function metaBuildReply(S, man){
+  const theirs = new Map(man.m), mineKeys = new Set(), add = [], chg = [];
+  for(const [t, r] of Object.entries(S.m)){
+    const kh = syncHash(t); mineKeys.add(kh);
+    if(!theirs.has(kh)) add.push([t, ...r]);
+    else if(theirs.get(kh) !== metaRowHash(r)) chg.push([t, ...r]);
+  }
+  return { add, chg, del: man.m.filter(([kh]) => !mineKeys.has(kh)).map(([kh]) => kh), w: man.w !== metaWorksHash(S) ? { w: S.w, a: S.a } : null };
+}
+function metaPatch(base, reply){
+  const del = new Set(reply.del), m = {};
+  for(const [t, r] of Object.entries(base.m)) if(!del.has(syncHash(t))) m[t] = r;
+  for(const [t, ...r] of reply.chg) m[t] = r;
+  for(const [t, ...r] of reply.add) m[t] = r;
+  return { w: [...(reply.w ? reply.w.w : base.w)], a: [...(reply.w ? reply.w.a : base.a)], m };
+}
+function metaResolve(local, reply){
+  const adds = reply.add.map(([t, ...r]) => ({ t, r }));
+  const chgs = [], og = {};
+  for(const [t, ...r] of reply.chg){
+    const cur = local.m[t]; if(!cur) continue;
+    if(cur[0] !== r[0]) chgs.push({ t, from: cur[0], to: r[0], order: r[1], added: r[2] });
+    else if(cur[1] !== r[1]) (og[r[0]] = og[r[0]] || {})[t] = r[1]; // 作品内の並びだけの違いは、作品ごとにまとめる
+  }
+  const orders = Object.entries(og).map(([work, vals]) => ({ work, vals }));
+  const byKh = new Map(Object.keys(local.m).map(t => [syncHash(t), t]));
+  const dels = reply.del.map(kh => byKh.get(kh)).filter(Boolean).map(t => ({ t, cat: local.m[t][0] }));
+  const works = reply.w && JSON.stringify([reply.w.w, reply.w.a]) !== JSON.stringify([local.w, local.a]) ? reply.w : null;
+  return { adds, chgs, orders, dels, works, total: adds.length + chgs.length + orders.length + dels.length + (works ? 1 : 0) };
+}
+// ----- コード（QR／コピー用）を短くするための詰め替え：内容は同じで、差分の持ち方だけを短くする -----
+// ・変更した曲は「変わった項目だけ」を送る（お気に入りの切り替えなら、キーと印だけ）
+// ・照合用のハッシュは末尾8文字に短縮し、既定値の末尾項目は省略し、空の配列は書かない
+const SYNC_DEF = ['', '', '', null, 0];
+const META_DEF = [undefined, undefined, undefined, 0];
+const syncTrim = (r, defs) => { const o = [...r]; while(o.length > 1 && o[o.length - 1] === defs[o.length - 1]) o.pop(); return o; };
+const syncFill = (r, defs) => { const o = [...r]; for(let i = o.length; i < defs.length; i++) o[i] = defs[i]; return o; };
+const packMask = (a, b) => a.reduce((m, v, i) => m | (JSON.stringify(v) !== JSON.stringify(b[i]) ? 1 << i : 0), 0);
+const packVals = (row, m) => row.filter((_, i) => (m >> i) & 1);
+function unpackRow(base, m, vals){ const row = [...base]; let j = 0; for(let i = 0; i < row.length; i++) if((m >> i) & 1) row[i] = vals[j++]; return row; }
+function syncPack(p, baseTracks, baseMeta){
+  const idx = new Map(syncIndex(baseTracks).map(x => [x.kh, x.t]));
+  const mh = new Map(Object.keys(baseMeta.m).map(t => [syncHash(t), baseMeta.m[t]]));
+  const uniq = new Set([...idx.keys()].map(k => k.slice(-8))).size === idx.size && new Set([...mh.keys()].map(k => k.slice(-8))).size === mh.size;
+  const kk = k => uniq ? k.slice(-8) : k; // 短縮キーが衝突するときだけ、省略しない
+  const o = { v: 7, b: p.b === null ? null : p.b.slice(-8), s: p.s.slice(-8), y: p.ms.slice(-8) };
+  if(!uniq) o.x = 1;
+  if(p.add.length) o.a = p.add.map(r => syncTrim(r, SYNC_DEF));
+  const c = p.chg.map(([kh, ...row]) => { const b = idx.get(kh), m = b ? packMask(row, syncRow(b)) : 31; return [kk(kh), m, ...packVals(row, m)]; });
+  if(c.length) o.c = c;
+  if(p.del.length) o.d = p.del.map(kk);
+  const mb = p.mb || { add: [], chg: [], del: [], w: null }, m = {};
+  if(mb.add.length) m.a = mb.add.map(r => syncTrim(r, META_DEF));
+  const mc = mb.chg.map(([t, ...row]) => { const b = mh.get(syncHash(t)), mk = b ? packMask(row, b) : 7; return [kk(syncHash(t)), mk, ...packVals(row, mk)]; });
+  if(mc.length) m.c = mc;
+  if(mb.del.length) m.d = mb.del.map(kk);
+  if(mb.w) m.w = { w: mb.w.w.map(n => baseMeta.w.includes(n) ? baseMeta.w.indexOf(n) : n), a: mb.w.a }; // 作品の並びは、既に基準にある作品を番号で表す
+  if(Object.keys(m).length) o.m = m;
+  return o;
+}
+function syncUnpack(o, baseTracks, baseMeta){
+  const sk = k => o.x ? k : k.slice(-8);
+  const byS = new Map(syncIndex(baseTracks).map(x => [sk(x.kh), x]));
+  const byM = new Map(Object.keys(baseMeta.m).map(t => [sk(syncHash(t)), { kh: syncHash(t), t }]));
+  const m = o.m || {};
+  return { v: 6, short: true, b: o.b, s: o.s, ms: o.y,
+    add: (o.a || []).map(r => syncFill(r, SYNC_DEF)),
+    chg: (o.c || []).map(([k, mk, ...vals]) => { const x = byS.get(k); return [x.kh, ...unpackRow(syncRow(x.t), mk, vals)]; }),
+    del: (o.d || []).map(k => byS.get(k).kh),
+    mb: { add: (m.a || []).map(r => syncFill(r, META_DEF)),
+      chg: (m.c || []).map(([k, mk, ...vals]) => { const e = byM.get(k); return [e.t, ...unpackRow(baseMeta.m[e.t], mk, vals)]; }),
+      del: (m.d || []).map(k => byM.get(k).kh), w: m.w ? { w: m.w.w.map(n => typeof n === 'number' ? baseMeta.w[n] : n), a: m.w.a } : null } };
+}
 // === SYNC-CORE-END ===
 
 const syncLocalTracks = () => data.map(d => ({ id: d.id, title: d.title, circle: d.circle, orig: d.orig, sec: d.sec, fav: favorites.has(d.id) }));
@@ -1686,24 +1982,41 @@ function syncShow(f, v){
 }
 
 let syncDiff = null;
+const metaSnapshot = () => ({ w: [...WORKS_ORDER], a: [...ADDED_WORKS], m: Object.fromEntries(Object.entries(ORIG_META).map(([t, v]) => [t, [v.category, typeof v.order === 'number' ? v.order : 500, v.added ? 1 : 0]])) });
+const syncTotal = diff => diff.total + (diff.meta ? diff.meta.total : 0);
+
 function buildSyncPreviewHtml(diff){
-  if(!diff.total){
+  const meta = diff.meta;
+  const total = syncTotal(diff);
+  if(!total){
     return `<div class="track-detail"><div class="field title"><div class="flabel">変更：0件</div></div>
       <p class="transfer-note" style="margin:0;">送信側との違いはありませんでした。</p></div>`;
   }
   const rowStyle = 'display:flex; gap:8px; align-items:flex-start; padding:6px 0; font-size:13px;';
   const cb = (key, checked) => `<input type="checkbox" data-sync="${key}" ${checked ? 'checked' : ''} style="margin-top:3px; flex:none;">`;
+  const faint = t => `<span style="color:var(--ink-faint); font-size:12px;">${t}</span>`;
   const sub = t => escapeHtml([t.circle ? syncShow('circle', t.circle) : '', t.orig ? t.orig.split('\u3000').join(' / ') : '', t.sec != null ? fmtSec(t.sec) : ''].filter(Boolean).join('　｜　'));
-  const addRows = diff.adds.map((a, i) => `<label style="${rowStyle}">${cb('a:' + i, true)}<span><b>${escapeHtml(a.t.title)}</b>${a.t.fav ? ' ★' : ''}<br><span style="color:var(--ink-faint); font-size:12px;">${sub(a.t)}</span></span></label>`).join('');
+  const addRows = diff.adds.map((a, i) => `<label style="${rowStyle}">${cb('a:' + i, true)}<span><b>${escapeHtml(a.t.title)}</b>${a.t.fav ? ' ★' : ''}<br>${faint(sub(a.t))}</span></label>`).join('');
   const chgRows = diff.chgs.map((c, i) => `<div style="padding:6px 0; border-top:1px solid var(--line, rgba(255,255,255,.08));">
       <div style="font-size:13px; font-weight:bold;">${escapeHtml(c.title)}</div>
-      ${c.fields.map(fl => `<label style="${rowStyle}">${cb('c:' + i + ':' + fl.f, true)}<span>${fl.label}：<span style="color:var(--ink-faint);">${escapeHtml(syncShow(fl.f, fl.from))}</span> → <b>${escapeHtml(syncShow(fl.f, fl.to))}</b></span></label>`).join('')}
+      ${c.fields.map(fl => `<label style="${rowStyle}">${cb('c:' + i + ':' + fl.f, true)}<span>${fl.label}：${faint(escapeHtml(syncShow(fl.f, fl.from)))} → <b>${escapeHtml(syncShow(fl.f, fl.to))}</b></span></label>`).join('')}
     </div>`).join('');
-  const delRows = diff.dels.map((d, i) => `<label style="${rowStyle}">${cb('d:' + i, false)}<span><b>${escapeHtml(d.t.title)}</b><br><span style="color:var(--ink-faint); font-size:12px;">${sub(d.t)}</span></span></label>`).join('');
+  const delRows = diff.dels.map((d, i) => `<label style="${rowStyle}">${cb('d:' + i, false)}<span><b>${escapeHtml(d.t.title)}</b><br>${faint(sub(d.t))}</span></label>`).join('');
   const section = (title, count, body, open) => count ? `<details ${open ? 'open' : ''} style="margin-top:12px;"><summary style="cursor:pointer; font-size:14px;">${title}（${count}件）</summary>${body}</details>` : '';
+  let metaHtml = '';
+  if(meta && meta.total){
+    const rows = [];
+    if(meta.works) rows.push(`<label style="${rowStyle}">${cb('mw', true)}<span><b>作品の並び・追加した作品</b>を送信側に合わせる<br>${faint(escapeHtml(meta.works.w.join(' → ')))}</span></label>`);
+    meta.adds.forEach((a, i) => rows.push(`<label style="${rowStyle}">${cb('ma:' + i, true)}<span>原曲「<b>${escapeHtml(a.t)}</b>」を <b>${escapeHtml(a.r[0])}</b> に追加</span></label>`));
+    meta.chgs.forEach((c, i) => rows.push(`<label style="${rowStyle}">${cb('mc:' + i, true)}<span>原曲「<b>${escapeHtml(c.t)}</b>」の作品：${faint(escapeHtml(c.from))} → <b>${escapeHtml(c.to)}</b></span></label>`));
+    meta.orders.forEach((o, i) => rows.push(`<label style="${rowStyle}">${cb('mo:' + i, true)}<span>作品「<b>${escapeHtml(o.work)}</b>」の原曲の並び（${Object.keys(o.vals).length}曲）を変更</span></label>`));
+    meta.dels.forEach((d, i) => rows.push(`<label style="${rowStyle}">${cb('md:' + i, false)}<span>原曲「<b>${escapeHtml(d.t)}</b>」（${escapeHtml(d.cat)}）を削除 ${faint('（この端末にだけある分類）')}</span></label>`));
+    metaHtml = section('原曲の作品分類（原曲一覧）', meta.total, rows.join(''), true);
+  }
+  const metaN = meta ? meta.total : 0;
   return `<div class="track-detail">
-    <div class="field title"><div class="flabel">変更：${diff.total}件</div></div>
-    <p class="transfer-note" style="margin:0;">追加 ${diff.adds.length}件・変更 ${diff.chgs.length}件・削除候補 ${diff.dels.length}件。チェックを入れた内容だけがこの端末に反映されます。</p>
+    <div class="field title"><div class="flabel">変更：${total}件</div></div>
+    <p class="transfer-note" style="margin:0;">追加 ${diff.adds.length}件・変更 ${diff.chgs.length}件・削除候補 ${diff.dels.length}件・原曲分類 ${metaN}件。チェックを入れた内容だけがこの端末に反映されます。</p>
     <div style="display:flex; gap:8px; margin-top:10px;">
       <button type="button" class="btn btn-ghost" id="syncAllBtn" style="flex:1;">追加・変更をすべて選択</button>
       <button type="button" class="btn btn-ghost" id="syncNoneBtn" style="flex:1;">すべて解除</button>
@@ -1711,6 +2024,7 @@ function buildSyncPreviewHtml(diff){
     ${section('追加（この端末に無い曲）', diff.adds.length, addRows, diff.adds.length <= 30)}
     ${section('変更（項目ごとに選べます）', diff.chgs.length, chgRows, true)}
     ${section('削除候補（この端末にだけある曲。チェックすると削除）', diff.dels.length, delRows, true)}
+    ${metaHtml}
     <div class="detail-actions">
       <button type="button" class="btn btn-ghost" id="syncCancelBtn">キャンセル</button>
       <button type="button" class="btn btn-primary" id="syncApplyBtn">選択した内容を適用（0件）</button>
@@ -1718,41 +2032,58 @@ function buildSyncPreviewHtml(diff){
   </div>`;
 }
 function syncSelection(){
-  const sel = { adds: [], chgs: new Map(), dels: [] };
+  const sel = { adds: [], chgs: new Map(), dels: [], ma: [], mc: [], mo: [], md: [], mw: false };
   modalBody.querySelectorAll('[data-sync]:checked').forEach(el => {
     const [k, i, f] = el.dataset.sync.split(':');
     if(k === 'a') sel.adds.push(+i);
     else if(k === 'd') sel.dels.push(+i);
     else if(k === 'c'){ const cur = sel.chgs.get(+i) || []; cur.push(f); sel.chgs.set(+i, cur); }
+    else if(k === 'mw') sel.mw = true;
+    else if(['ma','mc','mo','md'].includes(k)) sel[k].push(+i);
   });
-  sel.count = sel.adds.length + sel.chgs.size + sel.dels.length;
+  sel.count = sel.adds.length + sel.chgs.size + sel.dels.length + sel.ma.length + sel.mc.length + sel.mo.length + sel.md.length + (sel.mw ? 1 : 0);
   return sel;
 }
 function syncUpdateCount(){
   const btn = document.getElementById('syncApplyBtn');
   if(btn) btn.textContent = `選択した内容を適用（${syncSelection().count}件）`;
 }
-// 共通の基準：引き継ぎが成功した時点の全曲データを保存しておき、次回はここからの差分だけを送る
-async function saveSyncBase(tracks){ await storeSet('syncBase', { hash: syncStateHash(tracks), rows: tracks.map(syncRow) }); }
+// 共通の基準：引き継ぎが成功した時点の全曲データ＋原曲分類を保存しておき、次回はここからの差分だけを送る
+async function saveSyncBase(tracks, meta){ await storeSet('syncBase', { rows: tracks.map(syncRow), meta: meta || null }); }
 async function loadSyncBase(){
   const b = await storeGet('syncBase');
-  return b && Array.isArray(b.rows) ? { hash: b.hash, tracks: b.rows.map(syncRowToTrack) } : null;
+  if(!b || !Array.isArray(b.rows)) return null;
+  const tracks = b.rows.map(syncRowToTrack), meta = b.meta && b.meta.m ? b.meta : META_EMPTY();
+  return { hash: syncBaseHash(tracks, meta), tracks, meta };
 }
-// reply: この端末のデータに対する差分 / S: 引き継ぎ後に共通の基準になる送信側の全曲データ
-function showSyncPreview(reply, S){
+// reply: この端末のデータに対する差分（reply.meta は原曲分類の差分） / S, MS: 引き継ぎ後に共通の基準になる送信側のデータ
+function showSyncPreview(reply, S, MS){
   const ok = reply && reply.v === 5 && ['add','chg','del'].every(k => Array.isArray(reply[k]));
   if(!ok) return transferMsg('受信した内容が正しくありません。');
   syncDiff = syncResolve(syncLocalTracks(), reply);
-  syncDiff.S = S || null;
-  if(!syncDiff.total && S) saveSyncBase(S); // 違いが無くても基準は揃える
+  syncDiff.meta = reply.meta ? metaResolve(metaSnapshot(), reply.meta) : null;
+  syncDiff.S = S || null; syncDiff.MS = MS || null;
+  if(!syncTotal(syncDiff) && S) saveSyncBase(S, MS); // 違いが無くても基準は揃える
   openModal('データ引き継ぎ：変更内容の確認', buildSyncPreviewHtml(syncDiff));
   syncUpdateCount();
+}
+function metaApply(meta, sel){
+  for(const i of sel.ma){ const { t, r } = meta.adds[i]; ORIG_META[t] = { category: r[0], order: r[1], ...(r[2] ? { added: true } : {}) }; }
+  for(const i of sel.mc){ const c = meta.chgs[i]; ORIG_META[c.t] = { ...ORIG_META[c.t], category: c.to, order: c.order, ...(c.added ? { added: true } : {}) }; }
+  for(const i of sel.mo){ for(const [t, o] of Object.entries(meta.orders[i].vals)) if(ORIG_META[t]) ORIG_META[t] = { ...ORIG_META[t], order: o }; }
+  for(const i of sel.md) delete ORIG_META[meta.dels[i].t];
+  if(sel.mw && meta.works){ WORKS_ORDER.length = 0; WORKS_ORDER.push(...meta.works.w); ADDED_WORKS.length = 0; ADDED_WORKS.push(...meta.works.a); }
+  for(const m of Object.values(ORIG_META)){ // 分類に使われているのに作品一覧に無い作品は、末尾に足して見えなくならないようにする
+    const c = m.category;
+    if(c && !c.startsWith('__') && !WORKS_ORDER.includes(c)){ WORKS_ORDER.push(c); ADDED_WORKS.push(c); }
+  }
 }
 async function syncApplyNow(){
   if(!syncDiff) return;
   const sel = syncSelection();
   if(!sel.count) return;
-  if(sel.dels.length && !confirm(`${sel.dels.length}曲を削除します。よろしいですか？`)) return;
+  const delN = sel.dels.length + sel.md.length;
+  if(delN && !confirm(`${delN}件を削除します。よろしいですか？`)) return;
   for(const i of sel.adds){
     const t = syncDiff.adds[i].t, id = makeId();
     tracksById[id] = { title: t.title, circle: t.circle, orig: t.orig, sec: t.sec };
@@ -1769,12 +2100,14 @@ async function syncApplyNow(){
     }
   }
   for(const i of sel.dels){ const d = syncDiff.dels[i]; if(d.id in tracksById) deleteTrack(d.id); }
+  if(syncDiff.meta) metaApply(syncDiff.meta, sel);
   rebuildData();
   await persistTrackState();
   await persistFavorites();
+  await persistOrigMeta();
   render();
-  const summary = `追加 ${sel.adds.length}件・変更 ${sel.chgs.size}件・削除 ${sel.dels.length}件`;
-  if(syncDiff.S) await saveSyncBase(syncDiff.S);
+  const summary = `曲：追加 ${sel.adds.length}件・変更 ${sel.chgs.size}件・削除 ${sel.dels.length}件／原曲分類：${sel.ma.length + sel.mc.length + sel.mo.length + sel.md.length + (sel.mw ? 1 : 0)}件`;
+  if(syncDiff.S) await saveSyncBase(syncDiff.S, syncDiff.MS);
   syncDiff = null;
   closeModal();
   openModal('反映しました', `<p style="font-size:13px; margin:0;">${summary}を反映しました。</p>`);
@@ -1797,9 +2130,12 @@ function p2pSend(){
       if(!msg || msg.v !== 5 || !Array.isArray(msg.items)) return;
       const mine = syncLocalTracks();
       const reply = syncBuildReply(mine, msg.items);
+      const ms = metaSnapshot();
       reply.s = syncStateHash(mine);
+      reply.ms = metaStateHash(ms);
+      reply.meta = msg.meta ? metaBuildReply(ms, msg.meta) : null; // 原曲分類（作品・並び）の差分
       conn.send(reply);
-      saveSyncBase(mine); // 送った時点のデータを共通の基準にする
+      saveSyncBase(mine, ms); // 送った時点のデータを共通の基準にする
       setText('p2pNumber', '');
       transferMsg(`差分を送信しました（追加 ${reply.add.length}件・変更 ${reply.chg.length}件・相手にだけある曲 ${reply.del.length}件）。適用は受信側で選びます。`);
     });
@@ -1819,14 +2155,16 @@ function p2pReceive(){
   peer.on('error', e => transferMsg(e.type === 'peer-unavailable' ? 'その番号の端末が見つかりません。送信側の画面が開いているか確認してください。' : '通信エラー: ' + e.type));
   peer.on('open', () => {
     const conn = peer.connect(P2P_PREFIX + num, { reliable: true });
-    conn.on('open', () => { transferMsg('差分を確認しています…'); conn.send({ v: 5, items: syncManifest(syncLocalTracks()) }); });
+    conn.on('open', () => { transferMsg('差分を確認しています…'); conn.send({ v: 5, items: syncManifest(syncLocalTracks()), meta: metaManifest(metaSnapshot()) }); });
     conn.on('data', reply => {
       got = true; p2pStop();
       const ok = reply && reply.v === 5 && ['add','chg','del'].every(k => Array.isArray(reply[k]));
       if(!ok) return transferMsg('受信した内容が正しくありません。');
       const S = syncPatch(syncLocalTracks(), reply);
       if(reply.s && syncStateHash(S) !== reply.s) return transferMsg('受信内容を復元できませんでした。もう一度お試しください。');
-      showSyncPreview(reply, S);
+      const MS = reply.meta ? metaPatch(metaSnapshot(), reply.meta) : null;
+      if(MS && reply.ms && metaStateHash(MS) !== reply.ms) return transferMsg('原曲分類を復元できませんでした。もう一度お試しください。');
+      showSyncPreview(reply, S, MS);
     });
   });
   setTimeout(() => { if(p2p === peer && !got) transferMsg('接続できませんでした。もう一度お試しください。'); }, 20000);
@@ -1893,6 +2231,23 @@ function buildWorkBarChart(){
   return `<div class="bar-chart">${buildBarRowsHtml(rows)}</div>`;
 }
 
+// 複数サークル（合作）の組み合わせごとの曲数（並び順は無視して同じ組み合わせとして数える）
+function buildCircleMultiBarChart(){
+  const groups = {};
+  for(const d of data){
+    if(!d.circle) continue;
+    const { key, comps } = canonicalKey(d.circle);
+    if(comps.length < 2) continue;
+    if(!groups[key]) groups[key] = { label: comps.join(' × '), count: 0 };
+    groups[key].count += 1;
+  }
+  let rows = Object.values(groups).sort((a,b)=> b.count - a.count || a.label.localeCompare(b.label,'ja'));
+  const total = rows.length, TOP_N = 50;
+  rows = rows.slice(0, TOP_N);
+  if(!rows.length) return '<p class="bar-chart-empty">複数サークルの曲はありません</p>';
+  return `<div class="bar-chart">${buildBarRowsHtml(rows)}</div>`
+    + `<p class="bar-chart-note">${total > TOP_N ? `曲数の多い上位${TOP_N}組を表示（全${total.toLocaleString()}組中）` : `全${total.toLocaleString()}組`}</p>`;
+}
 function buildCircleBarChart(){
   const counts = {};
   for(const d of data){
@@ -1987,11 +2342,13 @@ function buildStatsHtml(){
       <button type="button" class="bar-tab active" data-bartab="work">作品別 曲数</button>
       <button type="button" class="bar-tab" data-bartab="origsong">原曲別 曲数</button>
       <button type="button" class="bar-tab" data-bartab="circle">サークル別 曲数</button>
+      <button type="button" class="bar-tab" data-bartab="circlemulti">サークル（複数）別 曲数</button>
       <button type="button" class="bar-tab" data-bartab="duration">尺の分布</button>
     </div>
     <div class="bar-panel" data-barpanel="work">${buildWorkBarChart()}</div>
     <div class="bar-panel" data-barpanel="origsong" style="display:none;">${buildOrigSongBarChart()}</div>
     <div class="bar-panel" data-barpanel="circle" style="display:none;">${buildCircleBarChart()}</div>
+    <div class="bar-panel" data-barpanel="circlemulti" style="display:none;">${buildCircleMultiBarChart()}</div>
     <div class="bar-panel" data-barpanel="duration" style="display:none;">${buildDurationBarChart()}</div>`;
 }
 
@@ -2015,6 +2372,11 @@ modalBody.addEventListener('input', e=>{
   const q = e.target.value.trim().toLowerCase();
   document.querySelectorAll('#flatListBody .list-row').forEach(row=>{
     row.style.display = row.dataset.fill.toLowerCase().includes(q) ? 'flex' : 'none';
+  });
+  document.querySelectorAll('#flatListBody details.work-group').forEach(g=>{ // 作品ごとの表示（原曲一覧（複））：一致が無い作品は隠し、検索中は開く
+    const hit = [...g.querySelectorAll('.list-row')].some(r => r.style.display !== 'none');
+    g.style.display = (!q || hit) ? '' : 'none';
+    if(q && hit) g.open = true;
   });
 });
 modalBody.addEventListener('click', async e=>{
@@ -2053,7 +2415,7 @@ modalBody.addEventListener('click', async e=>{
   }
 
   if(e.target.closest('#transferDoneBtn')){
-    if(transferPendingBase){ await saveSyncBase(transferPendingBase); transferMsg('基準を更新しました。次回はここからの差分だけを送ります。'); }
+    if(transferPendingBase){ await saveSyncBase(transferPendingBase.tracks, transferPendingBase.meta); transferMsg('基準を更新しました。次回はここからの差分だけを送ります。'); }
     return;
   }
   if(e.target.closest('#transferScanBtn')){ startTransferScan(); return; }
@@ -2124,9 +2486,48 @@ modalBody.addEventListener('click', async e=>{
   fillSearchAndClose(row.dataset.fill);
 });
 
+// 原曲一覧：作品・原曲の追加／並び替え
+modalBody.addEventListener('click', async e => {
+  if(e.target.closest('.drag-handle')){ e.preventDefault(); e.stopPropagation(); return; } // ハンドルのクリックで作品が開閉しないようにする
+  const b = e.target.closest('[data-oact]'); if(!b) return;
+  e.preventDefault(); e.stopPropagation(); // summary内のボタンで開閉が切り替わらないようにする
+  const act = b.dataset.oact;
+  const area = document.getElementById('origAddArea');
+  if(act === 'showWork' && area){ area.innerHTML = buildOrigAddForm('work'); document.getElementById('origWorkInput')?.focus(); }
+  else if(act === 'showSong' && area){ area.innerHTML = buildOrigAddForm('song'); document.getElementById('origSongInput')?.focus(); }
+  else if(act === 'cancelAdd' && area){ area.innerHTML = ''; }
+  else if(act === 'addWork') await origAddWork();
+  else if(act === 'addSong') await origAddSong();
+  else if(act === 'reorder'){ origReorder = !origReorder; refreshOrigLists(); }
+  else if(act === 'song'){
+    modalBody.querySelectorAll('details[data-work]').forEach(d => { if(d.open) origOpenWorks.add(d.dataset.work); else origOpenWorks.delete(d.dataset.work); });
+    modalTitle.textContent = '原曲'; modalBody.innerHTML = buildOrigSongModalHtml(b.dataset.orig);
+  }
+  else if(act === 'songBack') showOrigSingleList();
+  else if(act === 'songSearch') fillSearchAndClose(document.getElementById('origSongBox').dataset.orig);
+  else if(act === 'songMove'){
+    document.getElementById('origSongArea').innerHTML = `<div class="edit-field" style="margin-top:10px;"><label>移動先の作品名</label>
+      <input type="text" id="origMoveInput" list="origMoveList" placeholder="例）妖々夢" autocomplete="off">
+      <datalist id="origMoveList">${WORKS_ORDER.map(w => `<option value="${escapeHtml(w)}"></option>`).join('')}</datalist></div>
+      <div class="edit-error" id="origAddMsg" style="display:none;"></div>
+      <div class="detail-actions"><button type="button" class="btn btn-primary" data-oact="songDoMove">移動する</button></div>`;
+    document.getElementById('origMoveInput')?.focus();
+  }
+  else if(act === 'songDoMove') await origMoveSongTo(document.getElementById('origSongBox').dataset.orig, document.getElementById('origMoveInput')?.value || '');
+  else if(act === 'songDelete'){
+    const orig = document.getElementById('origSongBox').dataset.orig;
+    const work = ORIG_META[orig]?.category || '';
+    const cnt = data.filter(d => d.orig === orig).length;
+    document.getElementById('origSongArea').innerHTML = `<div class="edit-error" style="margin-top:10px;">「${escapeHtml(orig)}」を「${escapeHtml(work)}」の原曲一覧から削除します。よろしいですか？<br>${cnt ? `この原曲を使っている ${cnt} トラックの原曲欄は変わりません（削除後は作品分類不明に入ります）。` : 'この原曲を使っているトラックはありません。'}</div>
+      <div class="detail-actions"><button type="button" class="btn btn-ghost" data-oact="songDeleteNo">やめる</button><button type="button" class="btn btn-primary" data-oact="songDeleteYes">削除する</button></div>`;
+  }
+  else if(act === 'songDeleteNo') document.getElementById('origSongArea').innerHTML = '';
+  else if(act === 'songDeleteYes') await origDeleteSong(document.getElementById('origSongBox').dataset.orig);
+}, true);
+
 // 差分同期の確認画面（5桁P2P）
 modalBody.addEventListener('click', async e => {
-  if(e.target.closest('#syncAllBtn')){ modalBody.querySelectorAll('[data-sync^="a:"],[data-sync^="c:"]').forEach(el => el.checked = true); syncUpdateCount(); return; }
+  if(e.target.closest('#syncAllBtn')){ modalBody.querySelectorAll('[data-sync^="a:"],[data-sync^="c:"],[data-sync^="ma:"],[data-sync^="mc:"],[data-sync^="mo:"],[data-sync="mw"]').forEach(el => el.checked = true); syncUpdateCount(); return; }
   if(e.target.closest('#syncNoneBtn')){ modalBody.querySelectorAll('[data-sync]').forEach(el => el.checked = false); syncUpdateCount(); return; }
   if(e.target.closest('#syncCancelBtn')){ syncDiff = null; closeModal(); return; }
   if(e.target.closest('#syncApplyBtn')){ await syncApplyNow(); return; }
@@ -2819,6 +3220,7 @@ function initSky(){
 
 // ---------- init ----------
 (async function init(){
+  applyOrigMetaState(await storeGet('origMetaState')); // 追加・並び替えした作品分類を復元
   const legacyNoToId = {};
   const savedState = await storeGet('trackState');
   if(savedState && savedState.order && savedState.tracksById){
