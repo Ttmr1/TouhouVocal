@@ -290,6 +290,7 @@ function refreshDatalists(){
     const combined = new Set([...circleSet, ...origSet]);
     circleOrigListEl.innerHTML = toOptions(combined);
   }
+  refreshReplaceDatalist();
 }
 function makeId(){ return 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
 
@@ -1041,7 +1042,7 @@ document.querySelectorAll('.menu-dropdown button[data-modal]').forEach(btn=>{
     if(type === 'origSingle') openModal('原曲一覧（単）', buildOrigListSingleHtml());
     if(type === 'origMulti') openModal('原曲一覧（複）', buildOrigListMultiHtml());
     if(type === 'bgSettings') openModal('背景変更', buildBackgroundSettingsHtml());
-    if(type === 'replaceText') openModal('文字の置換', buildReplaceTextHtml());
+    if(type === 'replaceText'){ openModal('文字の置換', buildReplaceTextHtml()); refreshReplaceDatalist(); }
     if(type === 'dataTransfer'){ openModal('データ引き継ぎ', buildDataTransferHtml()); populateDataTransferExport(); }
   });
 });
@@ -1513,11 +1514,11 @@ function buildReplaceTextHtml(){
     <div class="replace-panel">
       <div class="edit-field">
         <label>検索する文字列</label>
-        <input type="text" id="replaceFindInput" list="circleOrigDatalist" placeholder="例）サンプル商会" autocomplete="off">
+        <input type="text" id="replaceFindInput" list="replaceDatalist" placeholder="例）サンプル商会" autocomplete="off">
       </div>
       <div class="edit-field">
         <label>置換後の文字列</label>
-        <input type="text" id="replaceWithInput" list="circleOrigDatalist" placeholder="例）サンプル商会（改）" autocomplete="off">
+        <input type="text" id="replaceWithInput" list="replaceDatalist" placeholder="例）サンプル商会（改）" autocomplete="off">
       </div>
       <div class="replace-targets">
         <span class="replace-targets-label">対象</span>
@@ -1525,6 +1526,8 @@ function buildReplaceTextHtml(){
         <label class="replace-target-item"><input type="checkbox" id="replaceTargetCircle" checked> サークル</label>
         <label class="replace-target-item"><input type="checkbox" id="replaceTargetOrig" checked> 原曲</label>
       </div>
+      <p class="transfer-note" style="margin:-4px 0 8px;">チェックした項目だけが、検索・置換の対象になり、入力欄の候補（補助検索）にも表示されます。</p>
+      <datalist id="replaceDatalist"></datalist>
       <div class="edit-error" id="replaceError" style="display:none;"></div>
       <div id="replacePreviewArea"></div>
       <div class="detail-actions">
@@ -1533,6 +1536,17 @@ function buildReplaceTextHtml(){
         <button class="btn btn-primary" id="replaceExecuteBtn">すべて置換</button>
       </div>
     </div>`;
+}
+// 補助検索（入力欄の候補）：チェックした項目（曲名・サークル・原曲）の候補だけを出す
+function refreshReplaceDatalist(){
+  const el = document.getElementById('replaceDatalist'); if(!el) return;
+  const t = getReplaceTargets(), set = new Set();
+  for(const d of data){
+    if(t.title && d.title) set.add(d.title.trim());
+    if(t.circle && d.circle) splitComponents(d.circle).forEach(c => { const v = c.trim(); if(v) set.add(v); });
+    if(t.orig && d.orig) splitComponents(d.orig).forEach(o => { const v = o.trim(); if(v) set.add(v); });
+  }
+  el.innerHTML = [...set].filter(Boolean).sort((a,b) => a.localeCompare(b,'ja')).map(v => `<option value="${escapeHtml(v)}">`).join('');
 }
 function getReplaceTargets(){
   return {
@@ -2535,6 +2549,7 @@ modalBody.addEventListener('click', async e => {
 modalBody.addEventListener('change', e => {
   if(e.target.matches('[data-sync]')) syncUpdateCount();
   if(e.target.id === 'transferFullChk') populateDataTransferExport();
+  if(/^replaceTarget/.test(e.target.id || '')) refreshReplaceDatalist();
 });
 
 // スワイプ（左→次の曲 / 右→前の曲）と ←→ キーで詳細の前後移動
